@@ -31,7 +31,7 @@
     "playwright"
   ],
   "author": "jackwener",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jackwener/opencli.git"

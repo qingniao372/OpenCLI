@@ -152,4 +152,4 @@ git push --follow-tags
 
 ## License
 
-MIT
+[BSD-3-Clause](./LICENSE)
