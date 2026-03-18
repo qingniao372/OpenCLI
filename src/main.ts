@@ -16,6 +16,18 @@ import { browserSession, DEFAULT_BROWSER_COMMAND_TIMEOUT, runWithTimeout } from 
 import { PKG_VERSION } from './version.js';
 import { getCompletions, printCompletionScript } from './completion.js';
 import { CliError } from './errors.js';
+import {
+  DESKTOP_CDP_SITES,
+  buildDisconnectedStatusRow,
+  defaultSiteEndpoint,
+  isDesktopCdpCommand,
+  isDesktopCdpSite,
+  parseCdpPort,
+  probeCdpEndpoint,
+  removeSiteConnection,
+  resolveLiveSiteEndpoint,
+  saveSiteConnection,
+} from './connections.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,6 +170,74 @@ program.command('completion')
     printCompletionScript(shell);
   });
 
+program.command('connect')
+  .description('Connect a desktop Electron app over CDP and save the endpoint for future commands')
+  .argument('<site>', 'Desktop site name, e.g. chatwise or cursor')
+  .option('--port <port>', 'CDP port override')
+  .option('--endpoint <url>', 'CDP endpoint override, e.g. http://127.0.0.1:9228')
+  .action(async (site, opts) => {
+    try {
+      if (!isDesktopCdpSite(site)) {
+        throw new CliError(
+          'CONNECT_UNSUPPORTED',
+          `Site "${site}" does not support managed CDP connections.`,
+          `Supported sites: ${Object.keys(DESKTOP_CDP_SITES).sort().join(', ')}`
+        );
+      }
+
+      const endpoint = opts.endpoint
+        ? String(opts.endpoint)
+        : `http://127.0.0.1:${opts.port ? parseCdpPort(String(opts.port)) : DESKTOP_CDP_SITES[site].defaultPort}`;
+
+      const ok = await probeCdpEndpoint(endpoint);
+      if (!ok) {
+        const suggested = defaultSiteEndpoint(site);
+        throw new CliError(
+          'CONNECT_FAILED',
+          `Could not connect to ${site} via CDP at ${endpoint}.`,
+          `Launch ${DESKTOP_CDP_SITES[site].appName} with remote debugging enabled${suggested ? ` (default ${suggested})` : ''} and retry.`
+        );
+      }
+
+      const saved = saveSiteConnection(site, endpoint);
+      console.log(`Connected ${site} -> ${saved.endpoint}`);
+    } catch (err: any) {
+      if (err instanceof CliError) {
+        console.error(chalk.red(`Error [${err.code}]: ${err.message}`));
+        if (err.hint) console.error(chalk.yellow(`Hint: ${err.hint}`));
+      } else {
+        console.error(chalk.red(`Error: ${err.message ?? err}`));
+      }
+      process.exitCode = 1;
+    }
+  });
+
+program.command('disconnect')
+  .description('Remove the saved CDP connection for a desktop Electron app')
+  .argument('<site>', 'Desktop site name, e.g. chatwise or cursor')
+  .action((site) => {
+    try {
+      if (!isDesktopCdpSite(site)) {
+        throw new CliError(
+          'DISCONNECT_UNSUPPORTED',
+          `Site "${site}" does not support managed CDP connections.`,
+          `Supported sites: ${Object.keys(DESKTOP_CDP_SITES).sort().join(', ')}`
+        );
+      }
+
+      removeSiteConnection(site);
+      console.log(`Disconnected ${site}.`);
+    } catch (err: any) {
+      if (err instanceof CliError) {
+        console.error(chalk.red(`Error [${err.code}]: ${err.message}`));
+        if (err.hint) console.error(chalk.yellow(`Hint: ${err.hint}`));
+      } else {
+        console.error(chalk.red(`Error: ${err.message ?? err}`));
+      }
+      process.exitCode = 1;
+    }
+  });
+
 // ── Dynamic site commands ──────────────────────────────────────────────────
 
 const registry = getRegistry();
@@ -209,15 +289,35 @@ for (const [, cmd] of registry) {
       if (actionOpts.verbose) process.env.OPENCLI_VERBOSE = '1';
       let result: any;
       if (cmd.browser) {
-        result = await browserSession(PlaywrightMCP, async (page) => {
-          // Cookie/header strategies require same-origin context for credentialed fetch.
-          // In CDP mode the active tab may be on an unrelated domain, causing CORS failures.
-          // Navigate to the command's domain first (mirrors cascade command behavior).
-          if ((cmd.strategy === Strategy.COOKIE || cmd.strategy === Strategy.HEADER) && cmd.domain) {
-            try { await page.goto(`https://${cmd.domain}`); await page.wait(2); } catch {}
+        if (isDesktopCdpCommand(cmd)) {
+          const cdpNotConnected = (hint: string): any => {
+            if (cmd.name === 'status') return [buildDisconnectedStatusRow(cmd)];
+            throw new CliError('NOT_CONNECTED', `${cmd.site} is not connected.`, hint);
+          };
+          const endpoint = await resolveLiveSiteEndpoint(cmd.site);
+          if (!endpoint) {
+            result = cdpNotConnected(`Launch the app with remote debugging enabled, then run "opencli connect ${cmd.site}".`);
+          } else {
+            try {
+              result = await browserSession(PlaywrightMCP, async (page) => {
+                return runWithTimeout(executeCommand(cmd, page, kwargs, actionOpts.verbose), {
+                  timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT,
+                  label: fullName(cmd),
+                });
+              }, { cdpEndpoint: endpoint });
+            } catch (err) {
+              if (actionOpts.verbose) console.error(chalk.yellow(`[Verbose] CDP session failed: ${err instanceof Error ? err.message : String(err)}`));
+              result = cdpNotConnected(`The saved CDP endpoint could not be used. Relaunch the app with remote debugging enabled, then run "opencli connect ${cmd.site}" again.`);
+            }
           }
-          return runWithTimeout(executeCommand(cmd, page, kwargs, actionOpts.verbose), { timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT, label: fullName(cmd) });
-        });
+        } else {
+          result = await browserSession(PlaywrightMCP, async (page) => {
+            if ((cmd.strategy === Strategy.COOKIE || cmd.strategy === Strategy.HEADER) && cmd.domain) {
+              try { await page.goto(`https://${cmd.domain}`); await page.wait(2); } catch {}
+            }
+            return runWithTimeout(executeCommand(cmd, page, kwargs, actionOpts.verbose), { timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT, label: fullName(cmd) });
+          });
+        }
       } else { result = await executeCommand(cmd, null, kwargs, actionOpts.verbose); }
       if (actionOpts.verbose && (!result || (Array.isArray(result) && result.length === 0))) {
         console.error(chalk.yellow(`[Verbose] Warning: Command returned an empty result. If the website structural API changed or requires authentication, check the network or update the adapter.`));

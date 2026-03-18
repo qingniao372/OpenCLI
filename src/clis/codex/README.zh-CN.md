@@ -14,9 +14,9 @@
 
 ## 配置指南
 
-在你要运行命令的终端里导出环境变量：
+让 OpenCLI 连接到这个桌面应用：
 ```bash
-export OPENCLI_CODEX_CDP_ENDPOINT="http://127.0.0.1:9222"
+opencli connect codex
 ```
 
 ## 核心指令

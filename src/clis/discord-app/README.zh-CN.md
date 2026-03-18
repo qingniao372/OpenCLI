@@ -12,7 +12,7 @@
 ## 配置
 
 ```bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9232"
+opencli connect discord-app
 ```
 
 ## 命令

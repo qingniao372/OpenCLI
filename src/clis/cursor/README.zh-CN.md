@@ -13,7 +13,7 @@
 ## 配置
 
 ```bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9226"
+opencli connect cursor
 ```
 
 ## 命令

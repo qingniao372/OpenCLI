@@ -18,10 +18,10 @@ Start the Antigravity desktop app with the Chrome DevTools `remote-debugging-por
 
 *(Note: Depending on your installation, the executable might be named differently, e.g., \`Antigravity\` instead of \`Electron\`.)*
 
-Next, set the target port in your terminal session to tell OpenCLI where to connect:
+Next, connect OpenCLI to the app:
 
 \`\`\`bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9224"
+opencli connect antigravity
 \`\`\`
 
 ## Available Commands

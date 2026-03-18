@@ -7,14 +7,13 @@
 1. 安装 [ChatWise](https://chatwise.app/)。
 2. 通过远程调试端口启动：
    ```bash
-   /Applications/ChatWise.app/Contents/MacOS/ChatWise \
-     --remote-debugging-port=9228
+   /Applications/ChatWise.app/Contents/MacOS/ChatWise --remote-debugging-port=9228
    ```
 
 ## 配置
 
 ```bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9228"
+opencli connect chatwise
 ```
 
 ## 命令

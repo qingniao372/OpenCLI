@@ -98,7 +98,7 @@ export class PlaywrightMCP {
     }
   }
 
-  async connect(opts: { timeout?: number } = {}): Promise<IPage> {
+  async connect(opts: { timeout?: number; cdpEndpoint?: string } = {}): Promise<IPage> {
     if (this._state === 'connected' && this._page) return this._page;
     if (this._state === 'connecting') throw new Error('Playwright MCP is already connecting');
     if (this._state === 'closing') throw new Error('Playwright MCP is closing');
@@ -114,7 +114,9 @@ export class PlaywrightMCP {
     return new Promise<Page>((resolve, reject) => {
       const isDebug = process.env.DEBUG?.includes('opencli:mcp');
       const debugLog = (msg: string) => isDebug && console.error(`[opencli:mcp] ${msg}`);
-      const { endpoint: cdpEndpoint, requestedCdp } = resolveCdpEndpoint();
+      const resolved = resolveCdpEndpoint();
+      const cdpEndpoint = opts.cdpEndpoint ?? resolved.endpoint;
+      const requestedCdp = Boolean(opts.cdpEndpoint) || resolved.requestedCdp;
       const useExtension = !requestedCdp;
       const extensionToken = process.env.PLAYWRIGHT_MCP_EXTENSION_TOKEN;
       const tokenFingerprint = getTokenFingerprint(extensionToken);

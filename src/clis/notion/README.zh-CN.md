@@ -12,7 +12,7 @@
 ## 配置
 
 ```bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9230"
+opencli connect notion
 ```
 
 ## 命令

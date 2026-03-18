@@ -4,3 +4,4 @@ dist/
 .opencli/
 .mcp.json
 *.log
+.idea/

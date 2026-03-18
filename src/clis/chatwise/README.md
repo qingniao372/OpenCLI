@@ -7,14 +7,13 @@ Control the **ChatWise Desktop App** from the terminal via Chrome DevTools Proto
 1. Install [ChatWise](https://chatwise.app/).
 2. Launch with remote debugging port:
    ```bash
-   /Applications/ChatWise.app/Contents/MacOS/ChatWise \
-     --remote-debugging-port=9228
+   /Applications/ChatWise.app/Contents/MacOS/ChatWise --remote-debugging-port=9228
    ```
 
 ## Setup
 
 ```bash
-export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9228"
+opencli connect chatwise
 ```
 
 ## Commands

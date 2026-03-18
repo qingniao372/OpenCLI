@@ -14,9 +14,9 @@ Because Codex is built on Electron, OpenCLI can directly drive its internal UI, 
 
 ## Setup
 
-Export the CDP endpoint in your shell:
+Connect OpenCLI to the app:
 ```bash
-export OPENCLI_CODEX_CDP_ENDPOINT="http://127.0.0.1:9222"
+opencli connect codex
 ```
 
 ## Commands
