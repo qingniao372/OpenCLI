@@ -218,8 +218,9 @@ opencli weread ranking --limit 10        # 排行榜
 opencli jimeng generate --prompt "描述"  # AI 生图
 opencli jimeng history --limit 10        # 生成历史
 
-# Grok (Desktop)
-opencli grok ask "问题"                  # 提问 Grok (text positional)
+# Grok (default + explicit web)
+opencli grok ask --prompt "问题"         # 提问 Grok（兼容默认路径）
+opencli grok ask --prompt "问题" --web   # 显式 grok.com consumer web UI 路径
 
 # HuggingFace (public)
 opencli hf top --limit 10                # 热门模型
