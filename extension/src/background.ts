@@ -5,7 +5,7 @@
  * dispatches them to Chrome APIs (debugger/tabs/cookies), returns results.
  */
 
-import type { Command, Result } from './protocol';
+import type { Command, Result, SyncEvent } from './protocol';
 import { DAEMON_WS_URL, WS_RECONNECT_BASE_DELAY, WS_RECONNECT_MAX_DELAY } from './protocol';
 import * as executor from './cdp';
 
@@ -216,6 +216,10 @@ async function handleCommand(cmd: Command): Promise<Result> {
         return await handleExportState(cmd, workspace);
       case 'import-state':
         return await handleImportState(cmd, workspace);
+      case 'watch-state':
+        return handleWatchState(cmd);
+      case 'unwatch-state':
+        return handleUnwatchState(cmd);
       default:
         return { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` };
     }
@@ -625,6 +629,71 @@ async function handleImportState(cmd: Command, workspace: string): Promise<Resul
 
   return { id: cmd.id, ok: true, data: { imported: true, ...(errors.length ? { errors } : {}) } };
 }
+
+// ─── Real-time state sync ──────────────────────────────────────────────
+
+/** Set of domains being watched for state changes. Empty = all domains. */
+let watchedDomains: Set<string> | null = null; // null = not watching
+
+function handleWatchState(cmd: Command): Result {
+  if (cmd.domains?.length) {
+    watchedDomains = new Set(cmd.domains);
+  } else {
+    watchedDomains = new Set(); // empty = watch all
+  }
+  console.log(`[opencli] Watching state changes for: ${watchedDomains.size > 0 ? [...watchedDomains].join(', ') : 'all domains'}`);
+  return { id: cmd.id, ok: true, data: { watching: true, domains: cmd.domains ?? [] } };
+}
+
+function handleUnwatchState(cmd: Command): Result {
+  watchedDomains = null;
+  console.log('[opencli] Stopped watching state changes');
+  return { id: cmd.id, ok: true, data: { watching: false } };
+}
+
+function isDomainWatched(domain: string): boolean {
+  if (watchedDomains === null) return false;
+  if (watchedDomains.size === 0) return true; // watch all
+  // Check exact and parent domain match (e.g. .github.com matches github.com)
+  const clean = domain.replace(/^\./, '');
+  for (const watched of watchedDomains) {
+    if (clean === watched || clean.endsWith('.' + watched)) return true;
+  }
+  return false;
+}
+
+function sendSyncEvent(event: SyncEvent): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify(event));
+  } catch { /* ignore */ }
+}
+
+// Cookie change listener — fires whenever any cookie is set, deleted, or modified
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  const { cookie, removed, cause } = changeInfo;
+  if (!isDomainWatched(cookie.domain)) return;
+
+  const event: SyncEvent = {
+    type: 'state-change',
+    changeType: 'cookie',
+    domain: cookie.domain.replace(/^\./, ''),
+    cookie: {
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      expirationDate: cookie.expirationDate,
+      removed,
+      cause,
+    },
+    timestamp: Date.now(),
+  };
+
+  sendSyncEvent(event);
+});
 
 export const __test__ = {
   handleTabs,

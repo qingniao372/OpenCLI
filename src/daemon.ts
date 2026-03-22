@@ -27,6 +27,9 @@ const pending = new Map<string, {
 }>();
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Sync subscribers: CLI processes connected via /sync WebSocket path
+const syncSubscribers = new Set<WebSocket>();
+
 // Extension log ring buffer
 interface LogEntry { level: string; msg: string; ts: number; }
 const LOG_BUFFER_SIZE = 200;
@@ -136,7 +139,31 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 // ─── WebSocket for Extension ─────────────────────────────────────────
 
 const httpServer = createServer((req, res) => { handleRequest(req, res).catch(() => { res.writeHead(500); res.end(); }); });
-const wss = new WebSocketServer({ server: httpServer, path: '/ext' });
+const wss = new WebSocketServer({ noServer: true });
+
+// Handle WebSocket upgrade — route /ext to extension, /sync to sync subscribers
+httpServer.on('upgrade', (req, socket, head) => {
+  const pathname = req.url?.split('?')[0] ?? '/';
+
+  if (pathname === '/ext') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  } else if (pathname === '/sync') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      console.error('[daemon] Sync subscriber connected');
+      syncSubscribers.add(ws);
+
+      ws.on('close', () => {
+        console.error('[daemon] Sync subscriber disconnected');
+        syncSubscribers.delete(ws);
+      });
+      ws.on('error', () => syncSubscribers.delete(ws));
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 wss.on('connection', (ws: WebSocket) => {
   console.error('[daemon] Extension connected');
@@ -151,6 +178,17 @@ wss.on('connection', (ws: WebSocket) => {
         const prefix = msg.level === 'error' ? '❌' : msg.level === 'warn' ? '⚠️' : '📋';
         console.error(`${prefix} [ext] ${msg.msg}`);
         pushLog({ level: msg.level, msg: msg.msg, ts: msg.ts ?? Date.now() });
+        return;
+      }
+
+      // Handle state-change events — forward to all sync subscribers
+      if (msg.type === 'state-change') {
+        const payload = JSON.stringify(msg);
+        for (const sub of syncSubscribers) {
+          if (sub.readyState === WebSocket.OPEN) {
+            try { sub.send(payload); } catch { /* ignore */ }
+          }
+        }
         return;
       }
 

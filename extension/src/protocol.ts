@@ -5,7 +5,7 @@
  * Everything else is just JS code sent via 'exec'.
  */
 
-export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'export-state' | 'import-state';
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'export-state' | 'import-state' | 'watch-state' | 'unwatch-state';
 
 export interface Command {
   /** Unique request ID */
@@ -34,6 +34,8 @@ export interface Command {
   fullPage?: boolean;
   /** Storage type to export (export-state action) */
   storageType?: 'localStorage' | 'sessionStorage' | 'all';
+  /** Domain filter for watch-state */
+  domains?: string[];
   /** Browser state to import (import-state action) */
   state?: {
     cookies?: Array<{
@@ -60,6 +62,36 @@ export interface Command {
     }>;
     url?: string;
   };
+}
+
+/** Real-time state change event pushed from extension → daemon → sync subscribers */
+export interface SyncEvent {
+  type: 'state-change';
+  changeType: 'cookie' | 'localStorage' | 'sessionStorage';
+  /** The domain this change applies to */
+  domain: string;
+  /** For cookies: the changed cookie */
+  cookie?: {
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    secure: boolean;
+    httpOnly: boolean;
+    expirationDate?: number;
+    removed: boolean;
+    /** Reason for removal: 'expired', 'explicit', 'overwrite', etc */
+    cause?: string;
+  };
+  /** For storage: key-value change */
+  storage?: {
+    key: string;
+    newValue: string | null;
+    oldValue: string | null;
+    storageArea: 'localStorage' | 'sessionStorage';
+    url: string;
+  };
+  timestamp: number;
 }
 
 export interface Result {

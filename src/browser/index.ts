@@ -11,6 +11,8 @@ export { CDPBridge } from './cdp.js';
 export { CamoufoxBridge } from './camoufox-bridge.js';
 export { CamoufoxPage } from './camoufox-page.js';
 export { isDaemonRunning } from './daemon-client.js';
+export { LiveSyncService } from './live-sync.js';
+export type { SyncServiceOptions } from './live-sync.js';
 export { generateSnapshotJs, scrollToRefJs, getFormStateJs } from './dom-snapshot.js';
 export type { SnapshotOptions } from './dom-snapshot.js';
 

@@ -322,6 +322,55 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
       }
     });
 
+  browserCmd
+    .command('watch')
+    .description('Live sync: stream cookie/storage changes from Chrome → Camoufox in real-time')
+    .option('-d, --domain <domains>', 'Domains to watch (comma-separated)', '')
+    .action(async (opts) => {
+      const wsEndpoint = process.env.OPENCLI_CAMOUFOX_WS;
+      if (!wsEndpoint) {
+        console.error(chalk.red('OPENCLI_CAMOUFOX_WS is not set. Start camoufox first: opencli camoufox start'));
+        process.exitCode = 1;
+        return;
+      }
+
+      const domains = opts.domain ? opts.domain.split(',').map((d: string) => d.trim()).filter(Boolean) : [];
+      const { LiveSyncService } = await import('./browser/index.js');
+
+      const service = new LiveSyncService({
+        camoufoxWs: wsEndpoint,
+        domains,
+        onSync: (event) => {
+          if (event.changeType === 'cookie' && event.cookie) {
+            const action = event.cookie.removed ? chalk.red('DEL') : chalk.green('SET');
+            console.log(`${chalk.dim(new Date().toLocaleTimeString())} ${action} cookie ${chalk.cyan(event.cookie.name)} @ ${event.domain}`);
+          }
+          if (event.changeType === 'localStorage' && event.storage) {
+            console.log(`${chalk.dim(new Date().toLocaleTimeString())} ${chalk.yellow('UPD')} localStorage ${chalk.cyan(event.storage.key)} @ ${event.domain}`);
+          }
+        },
+        onError: (err) => {
+          console.error(chalk.red(`Sync error: ${err.message}`));
+        },
+      });
+
+      console.log(chalk.cyan(`🔄 Live sync started: Chrome → Camoufox`));
+      if (domains.length) console.log(chalk.dim(`   Watching: ${domains.join(', ')}`));
+      else console.log(chalk.dim(`   Watching: all domains`));
+      console.log(chalk.dim('   Press Ctrl+C to stop'));
+
+      await service.start();
+
+      // Keep running until Ctrl+C
+      process.on('SIGINT', async () => {
+        console.log(chalk.yellow('\n🛑 Stopping live sync...'));
+        const stats = service.getStats();
+        await service.stop();
+        console.log(chalk.dim(`   Synced ${stats.cookies} cookies, ${stats.storage} storage changes, ${stats.errors} errors`));
+        process.exit(0);
+      });
+    });
+
   // ── Built-in: camoufox lifecycle ──────────────────────────────────────────
 
   const camoufoxCmd = program.command('camoufox').description('Manage Camoufox browser');
@@ -358,46 +407,56 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
   camoufoxCmd
     .command('start')
     .description('Start Camoufox server')
-    .option('-p, --port <port>', 'WebSocket port', '19826')
-    .option('--headless', 'Run headless', true)
+    .option('-p, --port <port>', 'WebSocket port')
+    .option('--no-headless', 'Run with visible GUI')
     .option('--import <file>', 'Import state file after starting')
     .action(async (opts) => {
       const { spawn } = await import('node:child_process');
-      const port = opts.port;
+      const path = await import('node:path');
+      const url = await import('node:url');
 
-      console.log(chalk.cyan(`🦊 Starting Camoufox server on port ${port}...`));
+      console.log(chalk.cyan(`🦊 Starting Camoufox server...`));
 
-      const headlessFlag = opts.headless ? '--headless' : '';
-      const child = spawn('python3', [
-        '-m', 'camoufox', 'server',
-        '--port', port,
-        ...(headlessFlag ? [headlessFlag] : []),
-      ], {
+      // Use our Python launcher script for reliable WS endpoint parsing
+      const scriptDir = path.dirname(url.fileURLToPath(import.meta.url));
+      const launcherScript = path.resolve(scriptDir, '..', 'scripts', 'camoufox_server.py');
+      const args = [launcherScript];
+      if (opts.headless) args.push('--headless');
+      if (opts.port) args.push('--port', opts.port);
+
+      const child = spawn('python3', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       });
 
+      // Parse the first line of stdout — JSON with ws_endpoint
+      const wsEndpoint = await new Promise<string>((resolve, reject) => {
+        let output = '';
+        const timeout = setTimeout(() => reject(new Error('Camoufox failed to start within 30 seconds')), 30000);
+
+        child.stdout!.on('data', (chunk: Buffer) => {
+          output += chunk.toString();
+          const lines = output.split('\n');
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const data = JSON.parse(trimmed);
+              clearTimeout(timeout);
+              if (data.error) { reject(new Error(data.error)); return; }
+              if (data.ws_endpoint) { resolve(data.ws_endpoint); return; }
+            } catch { /* not JSON yet, keep reading */ }
+          }
+        });
+
+        child.on('error', (err) => { clearTimeout(timeout); reject(err); });
+        child.on('exit', (code) => {
+          clearTimeout(timeout);
+          if (code !== 0) reject(new Error(`Camoufox exited with code ${code}`));
+        });
+      });
+
       child.unref();
-
-      // Wait for server to be ready
-      const wsEndpoint = `ws://127.0.0.1:${port}`;
-      let ready = false;
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 1000));
-        try {
-          const { firefox } = await import('playwright-core');
-          const browser = await firefox.connect(wsEndpoint, { timeout: 2000 });
-          await browser.close();
-          ready = true;
-          break;
-        } catch { /* not ready yet */ }
-      }
-
-      if (!ready) {
-        console.error(chalk.red('Camoufox failed to start within 30 seconds.'));
-        process.exitCode = 1;
-        return;
-      }
 
       console.log(chalk.green(`✅ Camoufox running at ${wsEndpoint}`));
       console.log(chalk.dim(`   Set: export OPENCLI_CAMOUFOX_WS=${wsEndpoint}`));
@@ -427,9 +486,13 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
   camoufoxCmd
     .command('status')
     .description('Check Camoufox server status')
-    .option('-p, --port <port>', 'WebSocket port', '19826')
-    .action(async (opts) => {
-      const wsEndpoint = process.env.OPENCLI_CAMOUFOX_WS ?? `ws://127.0.0.1:${opts.port}`;
+    .action(async () => {
+      const wsEndpoint = process.env.OPENCLI_CAMOUFOX_WS;
+      if (!wsEndpoint) {
+        console.log(chalk.yellow(`❌ OPENCLI_CAMOUFOX_WS is not set`));
+        console.log(chalk.dim('   Start with: opencli camoufox start'));
+        return;
+      }
       try {
         const { firefox } = await import('playwright-core');
         const browser = await firefox.connect(wsEndpoint, { timeout: 3000 });
@@ -438,8 +501,8 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
         console.log(chalk.green(`✅ Camoufox running at ${wsEndpoint}`));
         console.log(chalk.dim(`   Browser version: ${version}`));
       } catch {
-        console.log(chalk.yellow(`❌ Camoufox not running at ${wsEndpoint}`));
-        console.log(chalk.dim('   Start with: opencli camoufox start'));
+        console.log(chalk.yellow(`❌ Camoufox not reachable at ${wsEndpoint}`));
+        console.log(chalk.dim('   Restart with: opencli camoufox start'));
       }
     });
 

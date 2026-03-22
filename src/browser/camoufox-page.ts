@@ -12,6 +12,7 @@
 import type { Page as PwPage, BrowserContext } from 'playwright-core';
 import type { BrowserCookie, BrowserState, IPage, ScreenshotOptions, SnapshotOptions, WaitOptions } from '../types.js';
 import { formatSnapshot } from '../snapshotFormatter.js';
+import { wrapForEval } from './utils.js';
 import { generateSnapshotJs, scrollToRefJs, getFormStateJs } from './dom-snapshot.js';
 import {
   clickJs,
@@ -41,11 +42,11 @@ export class CamoufoxPage implements IPage {
   }
 
   async evaluate(js: string): Promise<unknown> {
-    // Playwright evaluate accepts a function or expression string.
-    // Our JS from dom-helpers/dom-snapshot are self-executing expressions,
-    // so we pass them directly. Playwright Juggler evaluates in the page context,
-    // bypassing CSP.
-    return this.page.evaluate(js);
+    // Apply same IIFE wrapping as the daemon-based Page class.
+    // This ensures adapter code that passes arrow functions or statements
+    // works identically across both backends.
+    const code = wrapForEval(js);
+    return this.page.evaluate(code);
   }
 
   async getCookies(opts: { domain?: string; url?: string } = {}): Promise<BrowserCookie[]> {
@@ -302,13 +303,7 @@ export class CamoufoxPage implements IPage {
   }
 
   async importState(state: BrowserState): Promise<void> {
-    // 1. Navigate to target URL
-    if (state.url) {
-      await this.page.goto(state.url, { waitUntil: 'load', timeout: 30000 });
-      await this.page.waitForTimeout(1000);
-    }
-
-    // 2. Import cookies via Playwright context API
+    // 1. Cookies FIRST — before navigation, so the initial request has cookies
     if (state.cookies?.length) {
       const pwCookies = state.cookies.map(c => ({
         name: c.name,
@@ -322,7 +317,14 @@ export class CamoufoxPage implements IPage {
       await this.context.addCookies(pwCookies);
     }
 
-    // 3. Import localStorage
+    // 2. Navigate — now the first request already carries cookies
+    if (state.url) {
+      await this.page.goto(state.url, { waitUntil: 'load', timeout: 30000 });
+      await this.page.waitForTimeout(1000);
+    }
+
+    // 3. Import localStorage via Playwright storageState-compatible path +
+    //    manual evaluate for completeness (storageState only covers origins)
     if (state.localStorage && Object.keys(state.localStorage).length > 0) {
       const entries = JSON.stringify(state.localStorage);
       await this.page.evaluate(`(() => { const e = ${entries}; for (const [k,v] of Object.entries(e)) window.localStorage.setItem(k,v); })()`);
@@ -367,10 +369,8 @@ export class CamoufoxPage implements IPage {
       `);
     }
 
-    // 6. Reload to apply cookies
-    if (state.cookies?.length) {
-      await this.page.reload({ waitUntil: 'load', timeout: 30000 });
-      await this.page.waitForTimeout(1000);
-    }
+    // 6. Reload to apply all injected state
+    await this.page.reload({ waitUntil: 'load', timeout: 30000 });
+    await this.page.waitForTimeout(1000);
   }
 }

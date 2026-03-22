@@ -258,6 +258,10 @@ async function handleCommand(cmd) {
         return await handleExportState(cmd, workspace);
       case "import-state":
         return await handleImportState(cmd, workspace);
+      case "watch-state":
+        return handleWatchState(cmd);
+      case "unwatch-state":
+        return handleUnwatchState(cmd);
       default:
         return { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` };
     }
@@ -635,3 +639,56 @@ async function handleImportState(cmd, workspace) {
   }
   return { id: cmd.id, ok: true, data: { imported: true, ...errors.length ? { errors } : {} } };
 }
+let watchedDomains = null;
+function handleWatchState(cmd) {
+  if (cmd.domains?.length) {
+    watchedDomains = new Set(cmd.domains);
+  } else {
+    watchedDomains = /* @__PURE__ */ new Set();
+  }
+  console.log(`[opencli] Watching state changes for: ${watchedDomains.size > 0 ? [...watchedDomains].join(", ") : "all domains"}`);
+  return { id: cmd.id, ok: true, data: { watching: true, domains: cmd.domains ?? [] } };
+}
+function handleUnwatchState(cmd) {
+  watchedDomains = null;
+  console.log("[opencli] Stopped watching state changes");
+  return { id: cmd.id, ok: true, data: { watching: false } };
+}
+function isDomainWatched(domain) {
+  if (watchedDomains === null) return false;
+  if (watchedDomains.size === 0) return true;
+  const clean = domain.replace(/^\./, "");
+  for (const watched of watchedDomains) {
+    if (clean === watched || clean.endsWith("." + watched)) return true;
+  }
+  return false;
+}
+function sendSyncEvent(event) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify(event));
+  } catch {
+  }
+}
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  const { cookie, removed, cause } = changeInfo;
+  if (!isDomainWatched(cookie.domain)) return;
+  const event = {
+    type: "state-change",
+    changeType: "cookie",
+    domain: cookie.domain.replace(/^\./, ""),
+    cookie: {
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      expirationDate: cookie.expirationDate,
+      removed,
+      cause
+    },
+    timestamp: Date.now()
+  };
+  sendSyncEvent(event);
+});
