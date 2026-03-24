@@ -30,6 +30,7 @@
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "test": "vitest run --project unit",
+    "test:adapter": "vitest run --project adapter",
     "test:all": "vitest run",
     "test:e2e": "vitest run --project e2e",
     "docs:dev": "vitepress dev docs",
