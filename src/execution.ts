@@ -157,7 +157,9 @@ export async function executeCommand(
       // Each adapter controls this via `navigateBefore` (see CliCommand docs).
       const preNavUrl = resolvePreNav(cmd);
       if (preNavUrl) {
-        try { await page.goto(preNavUrl); await page.wait(2); } catch {}
+        try { await page.goto(preNavUrl); await page.wait(2); } catch (err) {
+          if (debug) console.error(`[pre-nav] Failed to navigate to ${preNavUrl}: ${err instanceof Error ? err.message : err}`);
+        }
       }
       return runWithTimeout(runCommand(cmd, page, kwargs, debug), {
         timeout: cmd.timeoutSeconds ?? DEFAULT_BROWSER_COMMAND_TIMEOUT,

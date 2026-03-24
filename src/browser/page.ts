@@ -184,7 +184,7 @@ export class Page implements IPage {
       await new Promise(resolve => setTimeout(resolve, options * 1000));
       return;
     }
-    if (options.time) {
+    if (typeof options.time === 'number') {
       await new Promise(resolve => setTimeout(resolve, options.time! * 1000));
       return;
     }

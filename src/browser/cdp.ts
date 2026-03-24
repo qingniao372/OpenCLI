@@ -179,13 +179,17 @@ export class CDPBridge {
 }
 
 class CDPPage implements IPage {
+  private _pageEnabled = false;
   constructor(private bridge: CDPBridge) {}
 
   /** Navigate with proper load event waiting (P1 fix #3) */
   async goto(url: string, options?: { waitUntil?: 'load' | 'none'; settleMs?: number }): Promise<void> {
-    await this.bridge.send('Page.enable');
+    if (!this._pageEnabled) {
+      await this.bridge.send('Page.enable');
+      this._pageEnabled = true;
+    }
     const loadPromise = this.bridge.waitForEvent('Page.loadEventFired', 30_000)
-      .catch(() => {}); // Don't fail if event times out
+      .catch(() => {}); // Don't fail if load event times out — page may be an SPA
     await this.bridge.send('Page.navigate', { url });
     await loadPromise;
     // Smart settle: use DOM stability detection instead of fixed sleep.

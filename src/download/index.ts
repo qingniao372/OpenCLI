@@ -199,7 +199,9 @@ export function exportCookiesToNetscape(
     const cookiePath = cookie.path || '/';
     const secure = cookie.secure ? 'TRUE' : 'FALSE';
     const expiry = Math.floor(Date.now() / 1000) + 86400 * 365; // 1 year from now
-    lines.push(`${domain}\t${includeSubdomains}\t${cookiePath}\t${secure}\t${expiry}\t${cookie.name}\t${cookie.value}`);
+    const safeName = cookie.name.replace(/[\t\n\r]/g, '');
+    const safeValue = cookie.value.replace(/[\t\n\r]/g, '');
+    lines.push(`${domain}\t${includeSubdomains}\t${cookiePath}\t${secure}\t${expiry}\t${safeName}\t${safeValue}`);
   }
 
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -237,8 +239,13 @@ export async function ytdlpDownload(
       '--progress',
     ];
 
-    if (cookiesFile && fs.existsSync(cookiesFile)) {
-      args.push('--cookies', cookiesFile);
+    if (cookiesFile) {
+      if (fs.existsSync(cookiesFile)) {
+        args.push('--cookies', cookiesFile);
+      } else {
+        console.error(`[download] Cookies file not found: ${cookiesFile}, falling back to browser cookies`);
+        args.push('--cookies-from-browser', 'chrome');
+      }
     } else {
       // Try to use browser cookies
       args.push('--cookies-from-browser', 'chrome');

@@ -32,8 +32,8 @@ function postInstallLifecycle(pluginDir: string): void {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-  } catch {
-    // Non-fatal: npm install may fail if no real deps
+  } catch (err) {
+    console.error(`[plugin] npm install failed in ${pluginDir}: ${err instanceof Error ? err.message : err}`);
   }
 
   // Symlink host opencli so TS plugins resolve '@jackwener/opencli/registry'

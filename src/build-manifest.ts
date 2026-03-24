@@ -179,7 +179,8 @@ export function parseTsArgsBlock(argsBlock: string): ManifestEntry['args'] {
       choices: parseInlineChoices(body),
     });
 
-    cursor = objectStart + body.length + 2;
+    cursor = objectStart + body.length;
+    if (cursor <= objectStart) break; // safety: prevent infinite loop
   }
 
   return args;
@@ -300,7 +301,7 @@ export function scanTs(filePath: string, site: string): ManifestEntry | null {
  * prefer the TS version (it self-registers and typically has richer logic).
  */
 export function shouldReplaceManifestEntry(current: ManifestEntry, next: ManifestEntry): boolean {
-  if (current.type === next.type) return true;
+  if (current.type === next.type) return false;
   return current.type === 'yaml' && next.type === 'ts';
 }
 
