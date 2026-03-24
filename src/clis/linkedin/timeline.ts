@@ -1,5 +1,6 @@
 import { cli, Strategy } from '../../registry.js';
 import type { IPage } from '../../types.js';
+import { AuthRequiredError, EmptyResultError } from '../../errors.js';
 
 interface TimelinePost {
   rank?: number;
@@ -510,11 +511,11 @@ cli({
     }
 
     if (sawLoginWall && posts.length === 0) {
-      throw new Error('LinkedIn timeline requires an active signed-in browser session');
+      throw new AuthRequiredError('linkedin.com', 'LinkedIn timeline requires an active signed-in browser session');
     }
 
     if (posts.length === 0) {
-      throw new Error('No LinkedIn timeline posts found. Make sure your LinkedIn home feed is visible in the browser.');
+      throw new EmptyResultError('linkedin timeline', 'Make sure your LinkedIn home feed is visible in the browser.');
     }
 
     return posts.slice(0, limit).map((post, index) => ({
