@@ -25,6 +25,7 @@ const {
   installPlugin,
   listPlugins,
   _readLockFile,
+  _readLockFileWithWriter,
   _resolveEsbuildBin,
   uninstallPlugin,
   updatePlugin,
@@ -313,6 +314,33 @@ describe('lock file', () => {
       beta: {
         source: { kind: 'local', path: '/tmp/plugin' },
         commitHash: 'local',
+        installedAt: '2025-01-01T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('returns normalized entries even when migration rewrite fails', () => {
+    fs.mkdirSync(path.dirname(getLockFilePath()), { recursive: true });
+    fs.writeFileSync(getLockFilePath(), JSON.stringify({
+      alpha: {
+        source: 'https://github.com/user/opencli-plugins.git',
+        commitHash: 'abc1234567890def',
+        installedAt: '2025-01-01T00:00:00.000Z',
+        monorepo: { name: 'opencli-plugins', subPath: 'packages/alpha' },
+      },
+    }, null, 2));
+
+    expect(_readLockFileWithWriter(() => {
+      throw new Error('disk full');
+    })).toEqual({
+      alpha: {
+        source: {
+          kind: 'monorepo',
+          url: 'https://github.com/user/opencli-plugins.git',
+          repoName: 'opencli-plugins',
+          subPath: 'packages/alpha',
+        },
+        commitHash: 'abc1234567890def',
         installedAt: '2025-01-01T00:00:00.000Z',
       },
     });

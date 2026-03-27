@@ -451,7 +451,9 @@ export interface ValidationResult {
 
 // ── Lock file helpers ───────────────────────────────────────────────────────
 
-export function readLockFile(): Record<string, LockEntry> {
+function readLockFileWithWriter(
+  writeLock: (lock: Record<string, LockEntry>) => void = writeLockFile,
+): Record<string, LockEntry> {
   try {
     const raw = fs.readFileSync(getLockFilePath(), 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
@@ -474,13 +476,19 @@ export function readLockFile(): Record<string, LockEntry> {
     }
 
     if (changed) {
-      writeLockFile(lock);
+      try {
+        writeLock(lock);
+      } catch {}
     }
 
     return lock;
   } catch {
     return {};
   }
+}
+
+export function readLockFile(): Record<string, LockEntry> {
+  return readLockFileWithWriter(writeLockFile);
 }
 
 export function writeLockFile(lock: Record<string, LockEntry>): void {
@@ -1493,6 +1501,7 @@ export {
   parseSource as _parseSource,
   postInstallMonorepoLifecycle as _postInstallMonorepoLifecycle,
   readLockFile as _readLockFile,
+  readLockFileWithWriter as _readLockFileWithWriter,
   updateAllPlugins as _updateAllPlugins,
   validatePluginStructure as _validatePluginStructure,
   writeLockFile as _writeLockFile,
