@@ -10,7 +10,9 @@
 
 A CLI tool that turns **any website**, **Electron app**, or **local CLI tool** into a command-line interface — Bilibili, Zhihu, 小红书, Twitter/X, Reddit, YouTube, Antigravity, `gh`, `docker`, and [many more](#built-in-commands) — powered by browser session reuse and AI-native discovery.
 
-**Built for AI Agents**: Simply configure an instruction in your global `AGENT.md` or `.cursorrules` guiding the AI to execute `opencli list` via Bash to discover available tools. Register your favorite local CLIs (`opencli register mycli`), and the AI will automatically learn how to invoke all your tools perfectly!
+**Built for AI Agents** — Configure an instruction in your `AGENT.md` or `.cursorrules` to run `opencli list` via Bash. The AI will automatically discover and invoke all available tools.
+
+**CLI Hub** — Register any local CLI (`opencli register mycli`) so AI agents can discover and call it alongside built-in commands. Auto-installs missing tools via your package manager.
 
 **CLI for Electron Apps** — Turn any Electron application into a CLI tool. Recombine, script, and extend apps like Antigravity Ultra from the terminal. AI agents can now control other AI apps natively.
 
@@ -117,7 +119,7 @@ That's it! The daemon auto-starts when you run any browser command. No tokens, n
 
 ## CLI Hub
 
-OpenCLI acts as a universal hub for your existing command-line tools — unified discovery, auto-install, and pure passthrough execution.
+OpenCLI acts as a universal hub for your existing command-line tools — unified discovery, pure passthrough execution, and auto-install (if a tool isn't installed, OpenCLI runs `brew install <tool>` automatically before re-running the command).
 
 | External CLI | Description | Example |
 |--------------|-------------|---------|
