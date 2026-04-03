@@ -157,7 +157,7 @@ function getTurnsScript(): string {
         '[class*="message-text"]',
         '[class*="message-content"]',
       ];
-      const messageImageSelector = '[data-testid="message_text_content"] img, [data-testid="message_content"] img';
+      const messageImageSelector = messageTextSelectors.map((s) => s + ' img').join(', ');
 
       const extractTextChunks = (root) => {
         const chunks = [];
