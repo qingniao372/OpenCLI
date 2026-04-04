@@ -1,5 +1,5 @@
-import { cli, Strategy } from '../../registry.js';
-import { EmptyResultError } from '../../errors.js';
+import { cli, Strategy } from '../../src/registry.js';
+import { EmptyResultError } from '../../src/errors.js';
 import { DOMAIN, SITE, gqlEscape, gqlRequest, stripHtml } from './_helpers.js';
 
 cli({

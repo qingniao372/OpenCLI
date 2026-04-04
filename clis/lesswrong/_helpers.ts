@@ -1,4 +1,4 @@
-import { CommandExecutionError, EmptyResultError } from '../../errors.js';
+import { CommandExecutionError, EmptyResultError } from '../../src/errors.js';
 
 export const SITE = 'lesswrong';
 export const DOMAIN = 'www.lesswrong.com';
