@@ -1,5 +1,5 @@
-﻿import { cli, Strategy } from '../../registry.js';
-import type { IPage } from '../../types.js';
+﻿import { cli, Strategy } from '../../src/registry.js';
+import type { IPage } from '../../src/types.js';
 import {
   GEMINI_DEEP_RESEARCH_DEFAULT_CONFIRM_LABELS,
   GEMINI_DEEP_RESEARCH_DEFAULT_TOOL_LABELS,
