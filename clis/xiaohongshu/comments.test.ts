@@ -42,7 +42,7 @@ describe('xiaohongshu comments', () => {
 
     const result = (await command!.func!(page, { 'note-id': '69aadbcb000000002202f131', limit: 5 })) as any[];
 
-    expect((page.goto as any).mock.calls[0][0]).toContain('/explore/69aadbcb000000002202f131');
+    expect((page.goto as any).mock.calls[0][0]).toContain('/search_result/69aadbcb000000002202f131');
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ rank: 1, author: 'Alice', text: 'Great note!', likes: 10 });
     expect(result[1]).toMatchObject({ rank: 2, author: 'Bob', text: 'Very helpful', likes: 0 });
