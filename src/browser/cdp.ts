@@ -293,7 +293,10 @@ class CDPPage extends BasePage {
   async readNetworkCapture(): Promise<unknown[]> {
     // Give a brief moment for pending response bodies to resolve
     await new Promise(resolve => setTimeout(resolve, 200));
-    const entries = [...this._captureEntries];
+    // Drain buffer: return accumulated entries and clear, matching daemon/extension contract
+    const entries = this._captureEntries;
+    this._captureEntries = [];
+    this._captureRequestMap.clear();
     return entries;
   }
 

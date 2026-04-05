@@ -146,6 +146,27 @@ describe('CDPPage network capture', () => {
     expect(entries[0].requestHeaders).toEqual({ 'accept': 'application/json' });
   });
 
+  it('readNetworkCapture drains buffer (second read returns empty)', async () => {
+    const page = await bridge.connect();
+    await page.startNetworkCapture!();
+
+    const requestHandler = (bridge as any)._eventListeners.get('Network.requestWillBeSent');
+    const responseHandler = (bridge as any)._eventListeners.get('Network.responseReceived');
+    for (const fn of requestHandler) {
+      fn({ requestId: 'drain-1', request: { url: 'https://api.com/x', method: 'GET', headers: {} }, wallTime: 1 });
+    }
+    for (const fn of responseHandler) {
+      fn({ requestId: 'drain-1', response: { status: 200, mimeType: 'text/html', headers: {} } });
+    }
+
+    const first = await page.readNetworkCapture!();
+    expect(first.length).toBe(1);
+
+    // Second read should be empty (buffer drained)
+    const second = await page.readNetworkCapture!();
+    expect(second).toEqual([]);
+  });
+
   it('readNetworkCapture returns empty array when no capture started', async () => {
     const page = await bridge.connect();
     const entries = await page.readNetworkCapture!();
