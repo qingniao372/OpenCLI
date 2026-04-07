@@ -202,11 +202,11 @@ async function main() {
 
     try {
       const results = await engine.run();
-      const finalMetric = results[results.length - 1]?.metric ?? 0;
-      if (finalMetric > 0) {
-        console.log(`\n✅ Command spec "${specName}" passing!\n`);
+      const finalMetric = results[results.length - 1]?.metric ?? regressionCount;
+      if (finalMetric === 0) {
+        console.log(`\n✅ Command spec "${specName}" — all regressions fixed!\n`);
       } else {
-        console.log(`\n⚠ Command spec "${specName}" still failing after ${maxIterations} iterations.\n`);
+        console.log(`\n⚠ Command spec "${specName}" — ${finalMetric} regression(s) remaining after ${maxIterations} iterations.\n`);
       }
     } catch (err: any) {
       console.error(`\n❌ ${err.message}`);

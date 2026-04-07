@@ -38,12 +38,15 @@ function checkPrerequisites(spec: CommandIncidentSpec): { ok: boolean; reason: s
     }
   }
 
-  // Auth check: we can't verify cookies directly, so we check if the browser
-  // bridge is reachable. For auth-required specs, we mark as precondition
-  // failure if no browser profile is available. For now, auth specs with
-  // prerequisites.auth are allowed to proceed — they'll fail as regression
-  // if cookies are actually missing and the command errors out.
-  // This is intentionally lenient for Phase 1.
+  // Auth check: verify browser bridge is reachable for auth-required specs.
+  // Actual cookie validation is done post-hoc via output classification
+  // (auth failure patterns are detected after command execution).
+  if (prereqs.auth && prereqs.auth.length > 0) {
+    const bridgeCheck = execCommand('opencli operate eval "1+1"');
+    if (bridgeCheck.exitCode !== 0) {
+      return { ok: false, reason: 'Browser bridge not connected (required for auth-dependent command)' };
+    }
+  }
 
   return { ok: true, reason: '' };
 }
@@ -227,6 +230,34 @@ function runSpec(spec: CommandIncidentSpec, allowSideEffects: boolean): SpecResu
         stderr: result.stderr.slice(0, 500),
         exitCode: result.exitCode,
       };
+    }
+  }
+
+  // Auth/precondition failure detection (for specs with auth prerequisites)
+  if (spec.prerequisites?.auth && spec.prerequisites.auth.length > 0) {
+    const authPatterns = [
+      'are you logged in',
+      'not logged in',
+      'login required',
+      'please log in',
+      'authentication required',
+      'session required',
+      'cookie',
+      'unauthorized',
+      '401',
+    ];
+    for (const pattern of authPatterns) {
+      if (combinedOutput.includes(pattern.toLowerCase())) {
+        return {
+          name: spec.name,
+          classification: 'failed_precondition',
+          duration: Date.now() - start,
+          failedChecks: [`Auth failure detected: ${pattern}`],
+          stdout: result.stdout.slice(0, 500),
+          stderr: result.stderr.slice(0, 500),
+          exitCode: result.exitCode,
+        };
+      }
     }
   }
 
