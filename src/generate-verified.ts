@@ -66,7 +66,7 @@ export type EscalationReason =
 
 export type SuggestedAction =
   | 'stop'                       // nothing more to try
-  | 'inspect-with-browser'       // human should use browser skill to debug
+  | 'inspect-with-operate'       // v1 token retained for compatibility; points humans to the browser skill
   | 'ask-for-login'              // needs human to log in
   | 'ask-for-sample-arg'         // needs human to provide a real arg value
   | 'manual-review';             // general human review needed
@@ -408,13 +408,20 @@ function mapVerifyFailureToEscalation(reason: VerifyFailureReason): EscalationRe
 function suggestAction(reason: EscalationReason): SuggestedAction {
   switch (reason) {
     case 'unsupported-required-args': return 'ask-for-sample-arg';
-    case 'timeout': return 'inspect-with-browser';
-    case 'selector-mismatch': return 'inspect-with-browser';
-    case 'empty-result': return 'inspect-with-browser';
-    case 'sparse-fields': return 'inspect-with-browser';
-    case 'non-array-result': return 'inspect-with-browser';
+    case 'timeout': return 'inspect-with-operate';
+    case 'selector-mismatch': return 'inspect-with-operate';
+    case 'empty-result': return 'inspect-with-operate';
+    case 'sparse-fields': return 'inspect-with-operate';
+    case 'non-array-result': return 'inspect-with-operate';
     case 'verify-inconclusive': return 'manual-review';
   }
+}
+
+function renderSuggestedAction(action: SuggestedAction): string {
+  if (action === 'inspect-with-operate') {
+    return 'inspect-with-operate (use opencli-browser)';
+  }
+  return action;
 }
 
 function buildEscalation(
@@ -908,7 +915,7 @@ export function renderGenerateVerifiedSummary(result: GenerateOutcome): string {
   } else if (result.status === 'needs-human-check' && result.escalation) {
     lines.push(`Stage: ${result.escalation.stage}`);
     lines.push(`Reason: ${result.escalation.reason}`);
-    lines.push(`Suggested action: ${result.escalation.suggested_action}`);
+    lines.push(`Suggested action: ${renderSuggestedAction(result.escalation.suggested_action)}`);
     lines.push(`Candidate: ${result.escalation.candidate.command}`);
     lines.push(`Reusability: ${result.escalation.candidate.reusability}`);
     if (result.message) lines.push(`Message: ${result.message}`);

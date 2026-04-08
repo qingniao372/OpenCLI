@@ -13,6 +13,7 @@ const {
   mockRenderCascadeResult,
   mockGetBrowserFactory,
   mockBrowserSession,
+  mockBridgeConnect,
 } = vi.hoisted(() => ({
   mockExploreUrl: vi.fn(),
   mockRenderExploreSummary: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockRenderCascadeResult: vi.fn(),
   mockGetBrowserFactory: vi.fn(() => ({ name: 'BrowserFactory' })),
   mockBrowserSession: vi.fn(),
+  mockBridgeConnect: vi.fn(),
 }));
 
 vi.mock('./explore.js', () => ({
@@ -51,10 +53,17 @@ vi.mock('./runtime.js', () => ({
   browserSession: mockBrowserSession,
 }));
 
+vi.mock('./browser/index.js', () => ({
+  BrowserBridge: class {
+    connect = mockBridgeConnect;
+  },
+}));
+
 import { createProgram, findPackageRoot, resolveBrowserVerifyInvocation } from './cli.js';
 
 describe('built-in browser commands verbose wiring', () => {
   const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
   beforeEach(() => {
     delete process.env.OPENCLI_VERBOSE;
@@ -76,6 +85,11 @@ describe('built-in browser commands verbose wiring', () => {
       } as unknown as IPage;
       return fn(page);
     });
+    mockBridgeConnect.mockReset().mockResolvedValue({
+      snapshot: vi.fn().mockResolvedValue('state'),
+      getCurrentUrl: vi.fn().mockResolvedValue('https://example.com'),
+    });
+    consoleWarnSpy.mockClear();
   });
 
   it('enables OPENCLI_VERBOSE for explore via the real CLI command', async () => {
@@ -138,6 +152,17 @@ describe('built-in browser commands verbose wiring', () => {
     await program.parseAsync(['node', 'opencli', 'explore', 'https://example.com']);
 
     expect(process.env.OPENCLI_VERBOSE).toBeUndefined();
+  });
+
+  it('keeps a deprecated operate alias for browser commands', async () => {
+    const program = createProgram('', '');
+
+    await program.parseAsync(['node', 'opencli', 'operate', 'state']);
+
+    const browser = program.commands.find((cmd) => cmd.name() === 'browser');
+    expect(browser?.aliases()).toContain('operate');
+    expect(consoleWarnSpy).toHaveBeenCalledWith('`opencli operate` is deprecated. Use `opencli browser` instead.');
+    expect(mockBridgeConnect).toHaveBeenCalledWith({ timeout: 30, workspace: 'browser:default' });
   });
 
   consoleLogSpy.mockClear();
