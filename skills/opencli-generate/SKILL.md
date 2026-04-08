@@ -123,7 +123,7 @@ Receive GenerateOutcome
         reason: outcome.escalation.reason
         suggested_action: outcome.escalation.suggested_action
         reusability: outcome.reusability
-        path: outcome.escalation.candidate.path
+        path: outcome.escalation?.candidate?.path  (optional, only when reusable candidate exists)
         message: (see message templates below)
         → END (upper-level agent decides next step)
 ```
@@ -140,6 +140,7 @@ Receive GenerateOutcome
 | `needs-human-check` | `unsupported-required-args` | "候选需要参数 {args}，请提供示例值后重试" |
 | `needs-human-check` | `empty-result` | "候选验证返回空结果，建议用 opencli-operate 检查" |
 | `needs-human-check` | `sparse-fields` | "候选验证结果字段不足，建议人工检查" |
+| `needs-human-check` | `non-array-result` | "返回结果不是数组格式，建议用 opencli-operate 检查接口返回结构" |
 | `needs-human-check` | `timeout` | "验证超时，建议用 opencli-operate 手动检查接口响应" |
 | `needs-human-check` | `selector-mismatch` | "数据路径不匹配，建议用 opencli-operate 检查实际返回结构" |
 | `needs-human-check` | `verify-inconclusive` | "验证结果不确定，候选已保存在 {path}，需要人工审查" |
