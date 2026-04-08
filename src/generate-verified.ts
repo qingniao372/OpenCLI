@@ -76,6 +76,35 @@ export type Reusability =
   | 'unverified-candidate'       // candidate exists but not verified, needs manual review
   | 'not-reusable';              // nothing worth keeping
 
+// ── P2: Early Hint (internal cost gate) ──────────────────────────────────────
+// Emitted via optional onEarlyHint callback before verify stage.
+// Pure gatekeeping: does not make terminal decisions. P1 GenerateOutcome
+// remains the single source of truth.
+
+export type EarlyHintReason =
+  | 'api-surface-looks-viable'
+  | 'candidate-ready-for-verify'
+  | 'no-viable-api-surface'
+  | 'auth-too-complex'
+  | 'no-viable-candidate';
+
+export interface EarlyHint {
+  version: 1;
+  stage: 'explore' | 'synthesize' | 'cascade';
+  continue: boolean;
+  reason: EarlyHintReason;
+  confidence: Confidence;
+  candidate?: {
+    name: string;
+    command: string;
+    path: string | null;
+    reusability: 'unverified-candidate' | 'not-reusable';
+  };
+  message?: string;
+}
+
+export type EarlyHintHandler = (hint: EarlyHint) => void;
+
 // ── Outcome Types ─────────────────────────────────────────────────────────────
 
 type SupportedStrategy = Strategy.PUBLIC | Strategy.COOKIE;
@@ -146,6 +175,7 @@ export interface GenerateVerifiedOptions {
   top?: number;
   workspace?: string;
   noRegister?: boolean;
+  onEarlyHint?: EarlyHintHandler;
 }
 
 // ── Verified Artifact Metadata (sidecar) ──────────────────────────────────────
@@ -536,8 +566,15 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
     exploreDir: exploreResult.out_dir,
   });
 
-  // ── Early blocked: no API surface ───────────────────────────────────────
+  // ── Early hint: explore result ──────────────────────────────────────────
   if (exploreResult.api_endpoint_count === 0) {
+    opts.onEarlyHint?.({
+      version: 1,
+      stage: 'explore',
+      continue: false,
+      reason: 'no-viable-api-surface',
+      confidence: 'high',
+    });
     return {
       version: 1,
       status: 'blocked',
@@ -548,9 +585,23 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
       stats: baseStats,
     };
   }
+  opts.onEarlyHint?.({
+    version: 1,
+    stage: 'explore',
+    continue: true,
+    reason: 'api-surface-looks-viable',
+    confidence: 'medium',
+  });
 
-  // ── Early blocked: no candidate ─────────────────────────────────────────
+  // ── Early hint: synthesize result ───────────────────────────────────────
   if (!selected || synthesizeResult.candidate_count === 0) {
+    opts.onEarlyHint?.({
+      version: 1,
+      stage: 'synthesize',
+      continue: false,
+      reason: 'no-viable-candidate',
+      confidence: 'high',
+    });
     return {
       version: 1,
       status: 'blocked',
@@ -568,6 +619,13 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
   };
 
   if (!context.endpoint) {
+    opts.onEarlyHint?.({
+      version: 1,
+      stage: 'synthesize',
+      continue: false,
+      reason: 'no-viable-candidate',
+      confidence: 'medium',
+    });
     return {
       version: 1,
       status: 'blocked',
@@ -584,6 +642,8 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
   const unsupportedArgs = getUnsupportedVerificationArgs(originalCandidate);
 
   // ── Escalation: unsupported required args ───────────────────────────────
+  // Note: unsupported-required-args goes directly to P1 terminal.
+  // No P2 hint is emitted — this is a P1-only decision per design guardrail.
   if (unsupportedArgs.length > 0) {
     return {
       version: 1,
@@ -598,6 +658,20 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
     };
   }
 
+  opts.onEarlyHint?.({
+    version: 1,
+    stage: 'synthesize',
+    continue: true,
+    reason: 'candidate-ready-for-verify',
+    confidence: 'high',
+    candidate: {
+      name: selected.name,
+      command: commandName(bundle.manifest.site, selected.name),
+      path: selected.path ?? null,
+      reusability: 'unverified-candidate',
+    },
+  });
+
   // ── Phase 3: single browser session (probe + verify + repair) ───────────
   try {
     return await browserSession(opts.BrowserFactory, async (page) => {
@@ -606,6 +680,13 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
       // ── Probe: candidate-bound strategy ─────────────────────────────────
       const bestStrategy = await probeCandidateStrategy(page, context.endpoint!.url);
       if (!bestStrategy) {
+        opts.onEarlyHint?.({
+          version: 1,
+          stage: 'cascade',
+          continue: false,
+          reason: 'auth-too-complex',
+          confidence: 'high',
+        });
         return {
           version: 1,
           status: 'blocked',
@@ -616,6 +697,20 @@ export async function generateVerifiedFromUrl(opts: GenerateVerifiedOptions): Pr
           stats: baseStats,
         };
       }
+
+      opts.onEarlyHint?.({
+        version: 1,
+        stage: 'cascade',
+        continue: true,
+        reason: 'candidate-ready-for-verify',
+        confidence: 'high',
+        candidate: {
+          name: selected.name,
+          command: commandName(bundle.manifest.site, selected.name),
+          path: selected.path ?? null,
+          reusability: 'unverified-candidate',
+        },
+      });
 
       const candidate = applyStrategy(originalCandidate, bestStrategy);
       const goalStr = normalizedGoal ?? opts.goal ?? null;

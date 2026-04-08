@@ -57,7 +57,7 @@ vi.mock('./discovery.js', () => ({
 }));
 
 import { Strategy } from './registry.js';
-import { generateVerifiedFromUrl, type GenerateOutcome } from './generate-verified.js';
+import { generateVerifiedFromUrl, type GenerateOutcome, type EarlyHint } from './generate-verified.js';
 
 describe('generateVerifiedFromUrl', () => {
   let tempDir: string;
@@ -638,5 +638,374 @@ describe('generateVerifiedFromUrl', () => {
       expect(result).toHaveProperty('stage');
       expect(result).toHaveProperty('confidence');
     }
+  });
+
+  // ── P2: EarlyHint callback ────────────────────────────────────────────────
+
+  it('emits explore stop hint when no API surface found', async () => {
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test',
+      final_url: 'https://demo.test',
+      title: 'Demo',
+      framework: {},
+      stores: [],
+      top_strategy: 'public',
+      endpoint_count: 1,
+      api_endpoint_count: 0,
+      capabilities: [],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test', final_url: 'https://demo.test' },
+      endpoints: [],
+      capabilities: [],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 0,
+      candidates: [],
+    });
+
+    const hints: EarlyHint[] = [];
+    await generateVerifiedFromUrl({
+      url: 'https://demo.test',
+      BrowserFactory: class {} as never,
+      noRegister: true,
+      onEarlyHint: (h) => hints.push(h),
+    });
+
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toEqual({
+      version: 1,
+      stage: 'explore',
+      continue: false,
+      reason: 'no-viable-api-surface',
+      confidence: 'high',
+    });
+  });
+
+  it('emits explore continue + synthesize stop hints when no candidate found', async () => {
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test',
+      final_url: 'https://demo.test',
+      title: 'Demo',
+      framework: {},
+      stores: [],
+      top_strategy: 'public',
+      endpoint_count: 1,
+      api_endpoint_count: 1,
+      capabilities: [],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test', final_url: 'https://demo.test' },
+      endpoints: [{
+        pattern: 'demo.test/api/hot',
+        url: 'https://demo.test/api/hot',
+        itemPath: 'data.items',
+        itemCount: 5,
+        detectedFields: { title: 'title' },
+      }],
+      capabilities: [],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 0,
+      candidates: [],
+    });
+
+    const hints: EarlyHint[] = [];
+    await generateVerifiedFromUrl({
+      url: 'https://demo.test',
+      BrowserFactory: class {} as never,
+      noRegister: true,
+      onEarlyHint: (h) => hints.push(h),
+    });
+
+    expect(hints).toHaveLength(2);
+    expect(hints[0]).toMatchObject({ stage: 'explore', continue: true, reason: 'api-surface-looks-viable' });
+    expect(hints[1]).toMatchObject({ stage: 'synthesize', continue: false, reason: 'no-viable-candidate' });
+  });
+
+  it('emits explore + synthesize continue hints with candidate on success path', async () => {
+    const hotPath = path.join(tempDir, 'hot.yaml');
+    fs.writeFileSync(hotPath, yaml.dump({
+      site: 'demo',
+      name: 'hot',
+      description: 'demo hot',
+      domain: 'demo.test',
+      strategy: 'public',
+      browser: false,
+      args: {},
+      columns: ['title', 'url'],
+      pipeline: [
+        { fetch: { url: 'https://demo.test/api/hot' } },
+        { select: 'data.items' },
+      ],
+    }, { sortKeys: false }));
+
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test',
+      final_url: 'https://demo.test',
+      title: 'Demo',
+      framework: {},
+      stores: [],
+      top_strategy: 'public',
+      endpoint_count: 1,
+      api_endpoint_count: 1,
+      capabilities: [{ name: 'hot' }],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test', final_url: 'https://demo.test' },
+      endpoints: [{
+        pattern: 'demo.test/api/hot',
+        url: 'https://demo.test/api/hot',
+        itemPath: 'data.items',
+        itemCount: 5,
+        detectedFields: { title: 'title', url: 'url' },
+      }],
+      capabilities: [{ name: 'hot', strategy: 'public', endpoint: 'demo.test/api/hot', itemPath: 'data.items' }],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 1,
+      candidates: [{ name: 'hot', path: hotPath, strategy: 'public' }],
+    });
+
+    const page = { goto: vi.fn() } as unknown as IPage;
+    mockBrowserSession.mockImplementation(async (_factory, fn) => fn(page));
+    mockCascadeProbe.mockResolvedValue({
+      bestStrategy: Strategy.PUBLIC,
+      probes: [{ strategy: Strategy.PUBLIC, success: true }],
+      confidence: 1.0,
+    });
+    mockExecutePipeline.mockResolvedValue([
+      { title: 'Post 1', url: 'https://demo.test/1' },
+      { title: 'Post 2', url: 'https://demo.test/2' },
+    ]);
+
+    const hints: EarlyHint[] = [];
+    const result = await generateVerifiedFromUrl({
+      url: 'https://demo.test',
+      BrowserFactory: class {} as never,
+      noRegister: true,
+      onEarlyHint: (h) => hints.push(h),
+    });
+
+    expect(result.status).toBe('success');
+    expect(hints).toHaveLength(3);
+    expect(hints[0]).toMatchObject({ stage: 'explore', continue: true });
+    expect(hints[1]).toMatchObject({
+      stage: 'synthesize',
+      continue: true,
+      reason: 'candidate-ready-for-verify',
+      candidate: { name: 'hot', command: 'demo/hot', reusability: 'unverified-candidate' },
+    });
+    expect(hints[2]).toMatchObject({
+      stage: 'cascade',
+      continue: true,
+      reason: 'candidate-ready-for-verify',
+      candidate: { name: 'hot', command: 'demo/hot' },
+    });
+    // No candidate on explore hint
+    expect(hints[0]).not.toHaveProperty('candidate');
+  });
+
+  it('emits cascade stop hint when auth-too-complex', async () => {
+    const hotPath = path.join(tempDir, 'hot.yaml');
+    fs.writeFileSync(hotPath, yaml.dump({
+      site: 'demo',
+      name: 'hot',
+      description: 'demo hot',
+      domain: 'demo.test',
+      strategy: 'public',
+      browser: false,
+      args: {},
+      columns: ['title', 'url'],
+      pipeline: [
+        { fetch: { url: 'https://demo.test/api/hot' } },
+        { select: 'data.items' },
+      ],
+    }, { sortKeys: false }));
+
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test',
+      final_url: 'https://demo.test',
+      title: 'Demo',
+      framework: {},
+      stores: [],
+      top_strategy: 'cookie',
+      endpoint_count: 1,
+      api_endpoint_count: 1,
+      capabilities: [{ name: 'hot' }],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test', final_url: 'https://demo.test' },
+      endpoints: [{
+        pattern: 'demo.test/api/hot',
+        url: 'https://demo.test/api/hot',
+        itemPath: 'data.items',
+        itemCount: 5,
+        detectedFields: { title: 'title', url: 'url' },
+      }],
+      capabilities: [{ name: 'hot', strategy: 'cookie', endpoint: 'demo.test/api/hot', itemPath: 'data.items' }],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 1,
+      candidates: [{ name: 'hot', path: hotPath, strategy: 'public' }],
+    });
+
+    const page = { goto: vi.fn() } as unknown as IPage;
+    mockBrowserSession.mockImplementation(async (_factory, fn) => fn(page));
+    mockCascadeProbe.mockResolvedValue({
+      bestStrategy: Strategy.COOKIE,
+      probes: [
+        { strategy: Strategy.PUBLIC, success: false },
+        { strategy: Strategy.COOKIE, success: false },
+      ],
+      confidence: 0.3,
+    });
+
+    const hints: EarlyHint[] = [];
+    await generateVerifiedFromUrl({
+      url: 'https://demo.test',
+      BrowserFactory: class {} as never,
+      noRegister: true,
+      onEarlyHint: (h) => hints.push(h),
+    });
+
+    expect(hints).toHaveLength(3);
+    expect(hints[0]).toMatchObject({ stage: 'explore', continue: true });
+    expect(hints[1]).toMatchObject({ stage: 'synthesize', continue: true, reason: 'candidate-ready-for-verify' });
+    expect(hints[2]).toMatchObject({ stage: 'cascade', continue: false, reason: 'auth-too-complex' });
+    // No candidate on stop hint
+    expect(hints[2]).not.toHaveProperty('candidate');
+  });
+
+  it('does NOT emit P2 hint for unsupported-required-args (P1-only decision)', async () => {
+    const detailPath = path.join(tempDir, 'detail.yaml');
+    fs.writeFileSync(detailPath, yaml.dump({
+      site: 'demo',
+      name: 'detail',
+      description: 'demo detail',
+      domain: 'demo.test',
+      strategy: 'public',
+      browser: false,
+      args: {
+        id: { type: 'str', required: true },
+      },
+      columns: ['title', 'url'],
+      pipeline: [
+        { fetch: { url: 'https://demo.test/api/detail?id=${{ args.id }}' } },
+        { select: 'data.item' },
+      ],
+    }, { sortKeys: false }));
+
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test/detail/123',
+      final_url: 'https://demo.test/detail/123',
+      title: 'Demo detail',
+      framework: {},
+      stores: [],
+      top_strategy: 'public',
+      endpoint_count: 1,
+      api_endpoint_count: 1,
+      capabilities: [{ name: 'detail' }],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test/detail/123', final_url: 'https://demo.test/detail/123' },
+      endpoints: [{
+        pattern: 'demo.test/api/detail',
+        url: 'https://demo.test/api/detail?id=123',
+        itemPath: 'data.item',
+        itemCount: 1,
+        detectedFields: { title: 'title', url: 'url' },
+      }],
+      capabilities: [{ name: 'detail', strategy: 'public', endpoint: 'demo.test/api/detail', itemPath: 'data.item' }],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 1,
+      candidates: [{ name: 'detail', path: detailPath, strategy: 'public' }],
+    });
+
+    const hints: EarlyHint[] = [];
+    const result = await generateVerifiedFromUrl({
+      url: 'https://demo.test/detail/123',
+      BrowserFactory: class {} as never,
+      goal: 'detail',
+      noRegister: true,
+      onEarlyHint: (h) => hints.push(h),
+    });
+
+    expect(result.status).toBe('needs-human-check');
+    expect(result.escalation!.reason).toBe('unsupported-required-args');
+    // Only explore continue hint is emitted; NO synthesize hint before the P1 terminal
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatchObject({ stage: 'explore', continue: true });
+    // Specifically: no synthesize hint was emitted
+    expect(hints.find(h => h.stage === 'synthesize')).toBeUndefined();
+  });
+
+  it('does not emit hints when onEarlyHint is not provided', async () => {
+    mockExploreUrl.mockResolvedValue({
+      site: 'demo',
+      target_url: 'https://demo.test',
+      final_url: 'https://demo.test',
+      title: 'Demo',
+      framework: {},
+      stores: [],
+      top_strategy: 'public',
+      endpoint_count: 1,
+      api_endpoint_count: 0,
+      capabilities: [],
+      auth_indicators: [],
+      out_dir: tempDir,
+    });
+    mockLoadExploreBundle.mockReturnValue({
+      manifest: { site: 'demo', target_url: 'https://demo.test', final_url: 'https://demo.test' },
+      endpoints: [],
+      capabilities: [],
+    });
+    mockSynthesizeFromExplore.mockReturnValue({
+      site: 'demo',
+      explore_dir: tempDir,
+      out_dir: tempDir,
+      candidate_count: 0,
+      candidates: [],
+    });
+
+    // Should not throw even without onEarlyHint
+    const result = await generateVerifiedFromUrl({
+      url: 'https://demo.test',
+      BrowserFactory: class {} as never,
+      noRegister: true,
+    });
+
+    expect(result.status).toBe('blocked');
   });
 });
