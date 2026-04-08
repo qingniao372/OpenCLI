@@ -38,13 +38,13 @@ cli({
 });
 `);
 
-      delete (globalThis as any).__opencli_helper_loaded__;
+      delete (globalThis as { __opencli_helper_loaded__?: unknown }).__opencli_helper_loaded__;
       await discoverClis(tempRoot);
 
-      expect((globalThis as any).__opencli_helper_loaded__).toBeUndefined();
+      expect((globalThis as { __opencli_helper_loaded__?: unknown }).__opencli_helper_loaded__).toBeUndefined();
       expect(getRegistry().get('temp-site/hello')).toBeDefined();
     } finally {
-      delete (globalThis as any).__opencli_helper_loaded__;
+      delete (globalThis as { __opencli_helper_loaded__?: unknown }).__opencli_helper_loaded__;
       await fs.promises.rm(tempRoot, { recursive: true, force: true });
     }
   });
