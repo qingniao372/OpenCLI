@@ -141,6 +141,20 @@ OpenCLI is not only for websites. It can also:
 
 > **Important**: Browser-backed commands reuse your Chrome/Chromium login session. If you get empty data or permission-like failures, first confirm the site is already open and authenticated in Chrome/Chromium.
 
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCLI_DAEMON_PORT` | `19825` | HTTP port for the daemon-extension bridge |
+| `OPENCLI_WINDOW_FOCUSED` | `false` | Set to `1` to open automation windows in the foreground (useful for debugging) |
+| `OPENCLI_BROWSER_CONNECT_TIMEOUT` | `30` | Seconds to wait for browser connection |
+| `OPENCLI_BROWSER_COMMAND_TIMEOUT` | `60` | Seconds to wait for a single browser command |
+| `OPENCLI_BROWSER_EXPLORE_TIMEOUT` | `120` | Seconds to wait for explore/record operations |
+| `OPENCLI_CDP_ENDPOINT` | — | Chrome DevTools Protocol endpoint for remote browser or Electron apps |
+| `OPENCLI_CDP_TARGET` | — | Filter CDP targets by URL substring (e.g. `detail.1688.com`) |
+| `OPENCLI_VERBOSE` | `false` | Enable verbose logging (`-v` flag also works) |
+| `OPENCLI_DIAGNOSTIC` | `false` | Set to `1` to capture structured diagnostic context on failures |
+
 ## Update
 
 ```bash
