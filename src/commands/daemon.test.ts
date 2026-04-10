@@ -16,12 +16,10 @@ vi.mock('../browser/daemon-client.js', () => ({
 import { daemonStop } from './daemon.js';
 
 describe('daemonStop', () => {
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     fetchDaemonStatusMock.mockReset();
     requestDaemonShutdownMock.mockReset();
   });
@@ -35,7 +33,7 @@ describe('daemonStop', () => {
 
     await daemonStop();
 
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('not running'));
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('not running'));
   });
 
   it('sends shutdown and reports success', async () => {
@@ -53,7 +51,7 @@ describe('daemonStop', () => {
     await daemonStop();
 
     expect(requestDaemonShutdownMock).toHaveBeenCalledTimes(1);
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Daemon stopped'));
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Daemon stopped'));
   });
 
   it('reports failure when shutdown request fails', async () => {
@@ -70,6 +68,6 @@ describe('daemonStop', () => {
 
     await daemonStop();
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to stop daemon'));
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to stop daemon'));
   });
 });
