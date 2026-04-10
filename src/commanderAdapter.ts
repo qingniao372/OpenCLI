@@ -11,7 +11,6 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import { log } from './logger.js';
 import yaml from 'js-yaml';
 import { type CliCommand, fullName, getRegistry } from './registry.js';

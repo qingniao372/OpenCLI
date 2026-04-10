@@ -4,7 +4,6 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
 import yaml from 'js-yaml';
-import chalk from 'chalk';
 import { log } from './logger.js';
 import { EXIT_CODES, getErrorMessage } from './errors.js';
 
