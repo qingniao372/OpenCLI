@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import chalk from 'chalk';
+import { styleText } from 'node:util';
 import { findPackageRoot, getBuiltEntryCandidates } from './package-paths.js';
 import { type CliCommand, fullName, getRegistry, strategyLabel } from './registry.js';
 import { serializeCommand, formatArgSummary } from './serialization.js';
@@ -90,33 +90,33 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
       }
 
       console.log();
-      console.log(chalk.bold('  opencli') + chalk.dim(' — available commands'));
+      console.log(styleText('bold', '  opencli') + styleText('dim', ' — available commands'));
       console.log();
       for (const [site, cmds] of sites) {
-        console.log(chalk.bold.cyan(`  ${site}`));
+        console.log(styleText(['bold', 'cyan'], `  ${site}`));
         for (const cmd of cmds) {
           const label = strategyLabel(cmd);
           const tag = label === 'public'
-            ? chalk.green('[public]')
-            : chalk.yellow(`[${label}]`);
-          const aliases = cmd.aliases?.length ? chalk.dim(` (aliases: ${cmd.aliases.join(', ')})`) : '';
-          console.log(`    ${cmd.name} ${tag}${aliases}${cmd.description ? chalk.dim(` — ${cmd.description}`) : ''}`);
+            ? styleText('green', '[public]')
+            : styleText('yellow', `[${label}]`);
+          const aliases = cmd.aliases?.length ? styleText('dim', ` (aliases: ${cmd.aliases.join(', ')})`) : '';
+          console.log(`    ${cmd.name} ${tag}${aliases}${cmd.description ? styleText('dim', ` — ${cmd.description}`) : ''}`);
         }
         console.log();
       }
 
       const externalClis = loadExternalClis();
       if (externalClis.length > 0) {
-        console.log(chalk.bold.cyan('  external CLIs'));
+        console.log(styleText(['bold', 'cyan'], '  external CLIs'));
         for (const ext of externalClis) {
           const isInstalled = isBinaryInstalled(ext.binary);
-          const tag = isInstalled ? chalk.green('[installed]') : chalk.yellow('[auto-install]');
-          console.log(`    ${ext.name} ${tag}${ext.description ? chalk.dim(` — ${ext.description}`) : ''}`);
+          const tag = isInstalled ? styleText('green', '[installed]') : styleText('yellow', '[auto-install]');
+          console.log(`    ${ext.name} ${tag}${ext.description ? styleText('dim', ` — ${ext.description}`) : ''}`);
         }
         console.log();
       }
 
-      console.log(chalk.dim(`  ${commands.length} built-in commands across ${sites.size} sites, ${externalClis.length} external CLIs`));
+      console.log(styleText('dim', `  ${commands.length} built-in commands across ${sites.size} sites, ${externalClis.length} external CLIs`));
       console.log();
     });
 
@@ -755,15 +755,15 @@ cli({
         await discoverPlugins();
         if (Array.isArray(result)) {
           if (result.length === 0) {
-            console.log(chalk.yellow('No plugins were installed (all skipped or incompatible).'));
+            console.log(styleText('yellow', 'No plugins were installed (all skipped or incompatible).'));
           } else {
-            console.log(chalk.green(`\u2705 Installed ${result.length} plugin(s) from monorepo: ${result.join(', ')}`));
+            console.log(styleText('green', `\u2705 Installed ${result.length} plugin(s) from monorepo: ${result.join(', ')}`));
           }
         } else {
-          console.log(chalk.green(`\u2705 Plugin "${result}" installed successfully. Commands are ready to use.`));
+          console.log(styleText('green', `\u2705 Plugin "${result}" installed successfully. Commands are ready to use.`));
         }
       } catch (err) {
-        console.error(chalk.red(`Error: ${getErrorMessage(err)}`));
+        console.error(styleText('red', `Error: ${getErrorMessage(err)}`));
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
       }
     });
@@ -776,9 +776,9 @@ cli({
       const { uninstallPlugin } = await import('./plugin.js');
       try {
         uninstallPlugin(name);
-        console.log(chalk.green(`✅ Plugin "${name}" uninstalled.`));
+        console.log(styleText('green', `✅ Plugin "${name}" uninstalled.`));
       } catch (err) {
-        console.error(chalk.red(`Error: ${getErrorMessage(err)}`));
+        console.error(styleText('red', `Error: ${getErrorMessage(err)}`));
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
       }
     });
@@ -790,12 +790,12 @@ cli({
     .option('--all', 'Update all installed plugins')
     .action(async (name: string | undefined, opts: { all?: boolean }) => {
       if (!name && !opts.all) {
-        console.error(chalk.red('Error: Please specify a plugin name or use the --all flag.'));
+        console.error(styleText('red', 'Error: Please specify a plugin name or use the --all flag.'));
         process.exitCode = EXIT_CODES.USAGE_ERROR;
         return;
       }
       if (name && opts.all) {
-        console.error(chalk.red('Error: Cannot specify both a plugin name and --all.'));
+        console.error(styleText('red', 'Error: Cannot specify both a plugin name and --all.'));
         process.exitCode = EXIT_CODES.USAGE_ERROR;
         return;
       }
@@ -809,27 +809,27 @@ cli({
         }
 
         let hasErrors = false;
-        console.log(chalk.bold('  Update Results:'));
+        console.log(styleText('bold', '  Update Results:'));
         for (const result of results) {
           if (result.success) {
-            console.log(`  ${chalk.green('✓')} ${result.name}`);
+            console.log(`  ${styleText('green', '✓')} ${result.name}`);
             continue;
           }
           hasErrors = true;
-          console.log(`  ${chalk.red('✗')} ${result.name} — ${chalk.dim(result.error)}`);
+          console.log(`  ${styleText('red', '✗')} ${result.name} — ${styleText('dim', String(result.error))}`);
         }
 
         if (results.length === 0) {
-          console.log(chalk.dim('  No plugins installed.'));
+          console.log(styleText('dim', '  No plugins installed.'));
           return;
         }
 
         console.log();
         if (hasErrors) {
-          console.error(chalk.red('Completed with some errors.'));
+          console.error(styleText('red', 'Completed with some errors.'));
           process.exitCode = EXIT_CODES.GENERIC_ERROR;
         } else {
-          console.log(chalk.green('✅ All plugins updated successfully.'));
+          console.log(styleText('green', '✅ All plugins updated successfully.'));
         }
         return;
       }
@@ -837,9 +837,9 @@ cli({
       try {
         updatePlugin(name!);
         await discoverPlugins();
-        console.log(chalk.green(`✅ Plugin "${name}" updated successfully.`));
+        console.log(styleText('green', `✅ Plugin "${name}" updated successfully.`));
       } catch (err) {
-        console.error(chalk.red(`Error: ${getErrorMessage(err)}`));
+        console.error(styleText('red', `Error: ${getErrorMessage(err)}`));
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
       }
     });
@@ -853,8 +853,8 @@ cli({
       const { listPlugins } = await import('./plugin.js');
       const plugins = listPlugins();
       if (plugins.length === 0) {
-        console.log(chalk.dim('  No plugins installed.'));
-        console.log(chalk.dim(`  Install one with: opencli plugin install github:user/repo`));
+        console.log(styleText('dim', '  No plugins installed.'));
+        console.log(styleText('dim', '  Install one with: opencli plugin install github:user/repo'));
         return;
       }
       if (opts.format === 'json') {
@@ -867,7 +867,7 @@ cli({
         return;
       }
       console.log();
-      console.log(chalk.bold('  Installed plugins'));
+      console.log(styleText('bold', '  Installed plugins'));
       console.log();
 
       // Group by monorepo
@@ -881,26 +881,26 @@ cli({
       }
 
       for (const p of standalone) {
-        const version = p.version ? chalk.green(` @${p.version}`) : '';
-        const desc = p.description ? chalk.dim(` — ${p.description}`) : '';
-        const cmds = p.commands.length > 0 ? chalk.dim(` (${p.commands.join(', ')})`) : '';
-        const src = p.source ? chalk.dim(` ← ${p.source}`) : '';
-        console.log(`  ${chalk.cyan(p.name)}${version}${desc}${cmds}${src}`);
+        const version = p.version ? styleText('green', ` @${p.version}`) : '';
+        const desc = p.description ? styleText('dim', ` — ${p.description}`) : '';
+        const cmds = p.commands.length > 0 ? styleText('dim', ` (${p.commands.join(', ')})`) : '';
+        const src = p.source ? styleText('dim', ` ← ${p.source}`) : '';
+        console.log(`  ${styleText('cyan', p.name)}${version}${desc}${cmds}${src}`);
       }
 
       for (const [mono, group] of monoGroups) {
         console.log();
-        console.log(chalk.bold.magenta(`  📦 ${mono}`) + chalk.dim(' (monorepo)'));
+        console.log(styleText(['bold', 'magenta'], `  📦 ${mono}`) + styleText('dim', ' (monorepo)'));
         for (const p of group) {
-          const version = p.version ? chalk.green(` @${p.version}`) : '';
-          const desc = p.description ? chalk.dim(` — ${p.description}`) : '';
-          const cmds = p.commands.length > 0 ? chalk.dim(` (${p.commands.join(', ')})`) : '';
-          console.log(`    ${chalk.cyan(p.name)}${version}${desc}${cmds}`);
+          const version = p.version ? styleText('green', ` @${p.version}`) : '';
+          const desc = p.description ? styleText('dim', ` — ${p.description}`) : '';
+          const cmds = p.commands.length > 0 ? styleText('dim', ` (${p.commands.join(', ')})`) : '';
+          console.log(`    ${styleText('cyan', p.name)}${version}${desc}${cmds}`);
         }
       }
 
       console.log();
-      console.log(chalk.dim(`  ${plugins.length} plugin(s) installed`));
+      console.log(styleText('dim', `  ${plugins.length} plugin(s) installed`));
       console.log();
     });
 
@@ -917,19 +917,19 @@ cli({
           dir: opts.dir,
           description: opts.description,
         });
-        console.log(chalk.green(`✅ Plugin scaffold created at ${result.dir}`));
+        console.log(styleText('green', `✅ Plugin scaffold created at ${result.dir}`));
         console.log();
-        console.log(chalk.bold('  Files created:'));
+        console.log(styleText('bold', '  Files created:'));
         for (const f of result.files) {
-          console.log(`    ${chalk.cyan(f)}`);
+          console.log(`    ${styleText('cyan', f)}`);
         }
         console.log();
-        console.log(chalk.dim('  Next steps:'));
-        console.log(chalk.dim(`    cd ${result.dir}`));
-        console.log(chalk.dim(`    opencli plugin install file://${result.dir}`));
-        console.log(chalk.dim(`    opencli ${name} hello`));
+        console.log(styleText('dim', '  Next steps:'));
+        console.log(styleText('dim', `    cd ${result.dir}`));
+        console.log(styleText('dim', `    opencli plugin install file://${result.dir}`));
+        console.log(styleText('dim', `    opencli ${name} hello`));
       } catch (err) {
-        console.error(chalk.red(`Error: ${getErrorMessage(err)}`));
+        console.error(styleText('red', `Error: ${getErrorMessage(err)}`));
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
       }
     });
@@ -952,7 +952,7 @@ cli({
     .action((name: string) => {
       const ext = externalClis.find(e => e.name === name);
       if (!ext) {
-        console.error(chalk.red(`External CLI '${name}' not found in registry.`));
+        console.error(styleText('red', `External CLI '${name}' not found in registry.`));
         process.exitCode = EXIT_CODES.USAGE_ERROR;
         return;
       }
@@ -978,7 +978,7 @@ cli({
     try {
       executeExternalCli(name, args, externalClis);
     } catch (err) {
-      console.error(chalk.red(`Error: ${getErrorMessage(err)}`));
+      console.error(styleText('red', `Error: ${getErrorMessage(err)}`));
       process.exitCode = EXIT_CODES.GENERIC_ERROR;
     }
   }
@@ -1020,9 +1020,9 @@ cli({
 
   program.on('command:*', (operands: string[]) => {
     const binary = operands[0];
-    console.error(chalk.red(`error: unknown command '${binary}'`));
+    console.error(styleText('red', `error: unknown command '${binary}'`));
     if (isBinaryInstalled(binary)) {
-      console.error(chalk.dim(`  Tip: '${binary}' exists on your PATH. Use 'opencli register ${binary}' to add it as an external CLI.`));
+      console.error(styleText('dim', `  Tip: '${binary}' exists on your PATH. Use 'opencli register ${binary}' to add it as an external CLI.`));
     }
     program.outputHelp();
     process.exitCode = EXIT_CODES.USAGE_ERROR;

@@ -8,14 +8,6 @@ const {
   requestDaemonShutdownMock: vi.fn(),
 }));
 
-vi.mock('chalk', () => ({
-  default: {
-    green: (s: string) => s,
-    red: (s: string) => s,
-    dim: (s: string) => s,
-  },
-}));
-
 vi.mock('../browser/daemon-client.js', () => ({
   fetchDaemonStatus: fetchDaemonStatusMock,
   requestDaemonShutdown: requestDaemonShutdownMock,
