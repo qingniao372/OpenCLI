@@ -153,16 +153,22 @@ export function fetchAdapters() {
   for (const dir of LEGACY_SHIM_DIRS) {
     const p = join(OPENCLI_DIR, dir);
     try {
-      // Only delete if it contains shim .js files, not user content
-      const entries = readdirSync(p);
-      const allShims = entries.every(e => e.endsWith('.js'));
-      if (allShims && entries.length > 0) {
-        const firstContent = readFileSync(join(p, entries[0]), 'utf-8');
-        if (firstContent.includes("export * from 'file://")) {
-          rmSync(p, { recursive: true });
-          legacyCleaned++;
-        }
+      // Delete individual shim files, then prune empty directory
+      for (const entry of readdirSync(p)) {
+        const fp = join(p, entry);
+        try {
+          if (!statSync(fp).isFile()) continue;
+          const content = readFileSync(fp, 'utf-8');
+          if (content.includes("export * from 'file://")) {
+            unlinkSync(fp);
+            legacyCleaned++;
+          }
+        } catch { /* skip unreadable entries */ }
       }
+      // Remove directory only if now empty
+      try {
+        if (readdirSync(p).length === 0) rmSync(p);
+      } catch { /* ignore */ }
     } catch { /* doesn't exist or not a directory */ }
   }
 
