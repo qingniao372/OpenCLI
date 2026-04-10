@@ -102,6 +102,12 @@ describe('adapter imports use package exports', () => {
   });
 });
 
+function expectRealFile(target: string) {
+  const sourcePath = target.replace(/^\.\/dist\//, './').replace(/\.js$/, '.ts');
+  const fullPath = path.join(ROOT, sourcePath);
+  expect(fs.existsSync(fullPath), `Missing source: ${sourcePath}`).toBe(true);
+}
+
 describe('package.json exports resolve to real files', () => {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
   const exports = pkgJson.exports as Record<string, string>;
@@ -114,11 +120,7 @@ describe('package.json exports resolve to real files', () => {
     it(`export "${exportPath}" → ${target} has a source file`, () => {
       // Export targets point to dist/ (compiled). Verify the source .ts exists.
       // dist/src/foo.js → src/foo.ts
-      const sourcePath = target
-        .replace(/^\.\/dist\//, './')
-        .replace(/\.js$/, '.ts');
-      const fullPath = path.join(ROOT, sourcePath);
-      expect(fs.existsSync(fullPath), `Missing source: ${sourcePath}`).toBe(true);
+      expectRealFile(target);
     });
   }
 });
