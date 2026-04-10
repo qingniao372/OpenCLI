@@ -294,6 +294,14 @@ function pathExistsSync(p: string): boolean {
   }
 }
 
+function resolveRepoContainedPath(repoRoot: string, subPath: string): string {
+  const resolved = path.resolve(repoRoot, subPath);
+  if (!resolved.startsWith(repoRoot + path.sep) && resolved !== repoRoot) {
+    throw new PluginError(`Plugin path "${subPath}" escapes repo root.`);
+  }
+  return resolved;
+}
+
 function removePathSync(p: string): void {
   try {
     const stat = fs.lstatSync(p);
@@ -634,7 +642,7 @@ function publishStandalonePlugin(
   stagingDir: string,
   targetDir: string,
   writeLock: (commitHash: string | undefined) => void,
-): void {
+  ): void {
   runTransaction((tx) => {
     tx.track(beginReplaceDir(stagingDir, targetDir));
     writeLock(getCommitHash(targetDir));
@@ -662,7 +670,7 @@ function publishMonorepoPlugins(
     const commitHash = getCommitHash(repoDir);
     for (const plugin of plugins) {
       const linkPath = path.join(pluginsDir, plugin.name);
-      const subDir = path.join(repoDir, plugin.subPath);
+      const subDir = resolveRepoContainedPath(repoDir, plugin.subPath);
       tx.track(beginReplaceSymlink(subDir, linkPath));
     }
 
@@ -880,8 +888,10 @@ function installMonorepo(
       continue;
     }
 
-    const subDir = path.resolve(repoRoot, entry.path);
-    if (!subDir.startsWith(repoRoot + path.sep) && subDir !== repoRoot) {
+    let subDir: string;
+    try {
+      subDir = resolveRepoContainedPath(repoRoot, entry.path);
+    } catch {
       log.warn(`Skipping "${name}": path "${entry.path}" escapes repo root.`);
       continue;
     }
@@ -912,9 +922,15 @@ function installMonorepo(
   const publishPlugins = eligiblePlugins.map(({ name, entry }) => ({ name, subPath: entry.path }));
 
   if (repoAlreadyInstalled) {
-    postInstallMonorepoLifecycle(repoDir, eligiblePlugins.map((p) => path.join(repoDir, p.entry.path)));
+    postInstallMonorepoLifecycle(
+      repoDir,
+      eligiblePlugins.map((p) => resolveRepoContainedPath(repoDir, p.entry.path)),
+    );
   } else {
-    postInstallMonorepoLifecycle(cloneDir, eligiblePlugins.map((p) => path.join(cloneDir, p.entry.path)));
+    postInstallMonorepoLifecycle(
+      cloneDir,
+      eligiblePlugins.map((p) => resolveRepoContainedPath(cloneDir, p.entry.path)),
+    );
   }
 
   publishMonorepoPlugins(
@@ -971,7 +987,7 @@ function collectUpdatedMonorepoPlugins(
       throw new Error(`Sub-plugin "${pluginName}" requires opencli ${manifestEntry.opencli}`);
     }
 
-    const subDir = path.join(tmpCloneDir, manifestEntry.path);
+    const subDir = resolveRepoContainedPath(tmpCloneDir, manifestEntry.path);
     const validation = validatePluginStructure(subDir);
     if (!validation.valid) {
       throw new Error(`Updated sub-plugin "${pluginName}" is invalid:\n- ${validation.errors.join('\n- ')}`);
@@ -1122,7 +1138,10 @@ export function updatePlugin(name: string): void {
       );
 
       if (updatedPlugins.length > 0) {
-        postInstallMonorepoLifecycle(tmpCloneDir, updatedPlugins.map((plugin) => path.join(tmpCloneDir, plugin.manifestEntry.path)));
+        postInstallMonorepoLifecycle(
+          tmpCloneDir,
+          updatedPlugins.map((plugin) => resolveRepoContainedPath(tmpCloneDir, plugin.manifestEntry.path)),
+        );
       }
 
       publishMonorepoPlugins(

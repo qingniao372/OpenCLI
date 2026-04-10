@@ -16,7 +16,7 @@ import yaml from 'js-yaml';
 import { type CliCommand, fullName, getRegistry } from './registry.js';
 import { formatRegistryHelpText } from './serialization.js';
 import { render as renderOutput } from './output.js';
-import { executeCommand } from './execution.js';
+import { executeCommand, prepareCommandArgs } from './execution.js';
 import {
   CliError,
   EXIT_CODES,
@@ -76,18 +76,18 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
     // ── Execute + render ────────────────────────────────────────────────
     try {
       // ── Collect kwargs ────────────────────────────────────────────────
-      const kwargs: Record<string, unknown> = {};
+      const rawKwargs: Record<string, unknown> = {};
       for (let i = 0; i < positionalArgs.length; i++) {
         const v = actionArgs[i];
-        if (v !== undefined) kwargs[positionalArgs[i].name] = v;
+        if (v !== undefined) rawKwargs[positionalArgs[i].name] = v;
       }
       for (const arg of cmd.args) {
         if (arg.positional) continue;
         const camelName = arg.name.replace(/-([a-z])/g, (_m, ch: string) => ch.toUpperCase());
         const v = optionsRecord[arg.name] ?? optionsRecord[camelName];
-        if (v !== undefined) kwargs[arg.name] = normalizeArgValue(arg.type, v, arg.name);
+        if (v !== undefined) rawKwargs[arg.name] = normalizeArgValue(arg.type, v, arg.name);
       }
-      cmd.validateArgs?.(kwargs);
+      const kwargs = prepareCommandArgs(cmd, rawKwargs);
 
       const verbose = optionsRecord.verbose === true;
       let format = typeof optionsRecord.format === 'string' ? optionsRecord.format : 'table';
@@ -99,7 +99,7 @@ export function registerCommandToProgram(siteCmd: Command, cmd: CliCommand): voi
         log.warn(`Deprecated: ${message}${replacement}`);
       }
 
-      const result = await executeCommand(cmd, kwargs, verbose);
+      const result = await executeCommand(cmd, kwargs, verbose, { prepared: true });
       if (result === null || result === undefined) {
         return;
       }

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { executeCommand } from './execution.js';
+import { describe, expect, it, vi } from 'vitest';
+import type { CliCommand } from './registry.js';
+import { executeCommand, prepareCommandArgs } from './execution.js';
 import { TimeoutError } from './errors.js';
 import { cli, Strategy } from './registry.js';
 import { withTimeoutMs } from './runtime.js';
@@ -43,5 +44,24 @@ describe('executeCommand — non-browser timeout', () => {
     await expect(
       withTimeoutMs(executeCommand(cmd, {}), 50, 'sentinel timeout'),
     ).rejects.toThrow('sentinel timeout');
+  });
+
+  it('does not re-run custom validation when args are already prepared', async () => {
+    const validateArgs = vi.fn();
+    const cmd: CliCommand = {
+      site: 'test-execution',
+      name: 'prepared-validation',
+      description: 'test prepared validation path',
+      browser: false,
+      strategy: Strategy.PUBLIC,
+      args: [],
+      validateArgs,
+      func: async () => [],
+    };
+
+    const kwargs = prepareCommandArgs(cmd, {});
+    await executeCommand(cmd, kwargs, false, { prepared: true });
+
+    expect(validateArgs).toHaveBeenCalledTimes(1);
   });
 });

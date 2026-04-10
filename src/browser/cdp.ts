@@ -246,7 +246,7 @@ class CDPPage extends BasePage {
       // Step 1: Record request method/url on requestWillBeSent
       this.bridge.on('Network.requestWillBeSent', (params: unknown) => {
         const p = params as { requestId: string; request: { method: string; url: string }; timestamp: number };
-        if (!pattern || p.request.url.includes(pattern)) {
+        if (!this._networkCapturePattern || p.request.url.includes(this._networkCapturePattern)) {
           const idx = this._networkEntries.push({
             url: p.request.url,
             method: p.request.method,
