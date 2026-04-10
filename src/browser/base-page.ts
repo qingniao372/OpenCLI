@@ -24,6 +24,7 @@ import {
   waitForDomStableJs,
 } from './dom-helpers.js';
 import { formatSnapshot } from '../snapshotFormatter.js';
+import { log } from '../logger.js';
 
 export abstract class BasePage implements IPage {
   protected _lastUrl: string | null = null;
@@ -154,9 +155,7 @@ export abstract class BasePage implements IPage {
       return result;
     } catch (err) {
       // Log snapshot failure for debugging, then fallback to basic accessibility tree
-      if (process.env.DEBUG_SNAPSHOT) {
-        console.error('[snapshot] DOM snapshot failed, falling back to accessibility tree:', (err as Error)?.message?.slice(0, 200));
-      }
+      log.debug(`[snapshot] DOM snapshot failed, falling back to accessibility tree: ${(err as Error)?.message?.slice(0, 200)}`);
       return this._basicSnapshot(opts);
     }
   }

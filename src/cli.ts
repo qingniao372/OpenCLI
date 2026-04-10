@@ -21,6 +21,7 @@ import { loadExternalClis, executeExternalCli, installExternalCli, registerExter
 import { registerAllCommands } from './commanderAdapter.js';
 import { EXIT_CODES, getErrorMessage } from './errors.js';
 import { daemonStop } from './commands/daemon.js';
+import { log } from './logger.js';
 
 const CLI_FILE = fileURLToPath(import.meta.url);
 
@@ -300,11 +301,11 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
       } catch (err) {
         const msg = getErrorMessage(err);
         if (msg.includes('Extension not connected') || msg.includes('Daemon')) {
-          console.error(`Browser not connected. Run 'opencli doctor' to diagnose.`);
+          log.error(`Browser not connected. Run 'opencli doctor' to diagnose.`);
         } else if (msg.includes('attach failed') || msg.includes('chrome-extension://')) {
-          console.error(`Browser attach failed — another extension may be interfering. Try disabling 1Password.`);
+          log.error(`Browser attach failed — another extension may be interfering. Try disabling 1Password.`);
         } else {
-          console.error(`Error: ${msg}`);
+          log.error(msg);
         }
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
       }
