@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Copy official CLI adapters from the installed package to ~/.opencli/clis/.
+ * Smart-sync official CLI adapters from the installed package to ~/.opencli/clis/.
  *
- * Update strategy (file-level granularity via adapter-manifest.json):
- * - Official files (in new manifest) are unconditionally overwritten
+ * Update strategy (hash-based, file-level granularity):
+ * - Only copies files whose content has changed (hash mismatch) or are new
  * - Removed official files (in old manifest but not new) are cleaned up
  * - User-created files (never in any manifest) are preserved
- * - Skips if already installed at the same version
+ * - Skips entirely if already synced at the same version
  *
  * Only runs on global install (npm install -g) or explicit OPENCLI_FETCH=1.
  * No network calls — copies directly from clis/ in the installed package.
@@ -16,6 +16,7 @@
  */
 
 import { existsSync, mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -38,7 +39,14 @@ function getPackageVersion() {
 }
 
 /**
- * Read existing manifest. Returns { version, files } or null.
+ * Compute SHA-256 hash of file content.
+ */
+function fileHash(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * Read existing manifest. Returns { version, files, hashes } or null.
  */
 function readManifest() {
   try {
@@ -101,13 +109,25 @@ export function fetchAdapters() {
 
   const newOfficialFiles = new Set(walkFiles(BUILTIN_CLIS));
   const oldOfficialFiles = new Set(oldManifest?.files ?? []);
+  const oldHashes = oldManifest?.hashes ?? {};
   mkdirSync(USER_CLIS_DIR, { recursive: true });
 
-  // 1. Copy official files (unconditionally overwrite)
+  // 1. Smart sync: only copy files whose content has changed or are new
   let copied = 0;
+  let skipped = 0;
+  const newHashes = {};
   for (const relPath of newOfficialFiles) {
     const src = join(BUILTIN_CLIS, relPath);
     const dst = join(USER_CLIS_DIR, relPath);
+    const srcHash = fileHash(src);
+    newHashes[relPath] = srcHash;
+
+    // Skip if the upstream file hasn't changed since last sync
+    if (oldHashes[relPath] === srcHash && existsSync(dst)) {
+      skipped++;
+      continue;
+    }
+
     mkdirSync(dirname(dst), { recursive: true });
     cpSync(src, dst, { force: true });
     copied++;
@@ -206,15 +226,16 @@ export function fetchAdapters() {
     log(`Cleaned up${legacyCleaned > 0 ? ` ${legacyCleaned} legacy shim files` : ''}${tmpCleaned > 0 ? `${legacyCleaned > 0 ? ',' : ''} ${tmpCleaned} stale tmp files` : ''}`);
   }
 
-  // 6. Write updated manifest
+  // 6. Write updated manifest (with per-file hashes for smart sync)
   writeFileSync(MANIFEST_PATH, JSON.stringify({
     version: currentVersion,
     files: [...newOfficialFiles].sort(),
+    hashes: newHashes,
     updatedAt: new Date().toISOString(),
   }, null, 2));
 
-  log(`Installed ${copied} adapter files to ${USER_CLIS_DIR}` +
-    (removed > 0 ? `, removed ${removed} deprecated files` : ''));
+  log(`Synced adapters to ${USER_CLIS_DIR}: ${copied} updated, ${skipped} unchanged` +
+    (removed > 0 ? `, ${removed} removed` : ''));
 }
 
 function main() {

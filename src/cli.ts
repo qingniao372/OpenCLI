@@ -935,6 +935,112 @@ cli({
       }
     });
 
+  // ── Built-in: adapter management ─────────────────────────────────────────
+  const adapterCmd = program.command('adapter').description('Manage CLI adapters');
+
+  adapterCmd
+    .command('status')
+    .description('Show which sites have local overrides vs using official baseline')
+    .action(async () => {
+      const os = await import('node:os');
+      const userClisDir = path.join(os.homedir(), '.opencli', 'clis');
+      const builtinClisDir = BUILTIN_CLIS;
+      try {
+        const userEntries = await fs.promises.readdir(userClisDir, { withFileTypes: true });
+        const userSites = userEntries.filter(e => e.isDirectory()).map(e => e.name).sort();
+        let builtinSites: string[] = [];
+        try {
+          const builtinEntries = await fs.promises.readdir(builtinClisDir, { withFileTypes: true });
+          builtinSites = builtinEntries.filter(e => e.isDirectory()).map(e => e.name).sort();
+        } catch { /* no builtin dir */ }
+
+        if (userSites.length === 0) {
+          console.log('No local adapter overrides. All sites use the official baseline.');
+          return;
+        }
+
+        console.log(`Local overrides in ~/.opencli/clis/ (${userSites.length} sites):\n`);
+        for (const site of userSites) {
+          const isOfficial = builtinSites.includes(site);
+          const label = isOfficial ? 'override' : 'custom';
+          console.log(`  ${site} [${label}]`);
+        }
+        console.log(`\nOfficial baseline: ${builtinSites.length} sites in package`);
+      } catch {
+        console.log('No local adapter overrides. All sites use the official baseline.');
+      }
+    });
+
+  adapterCmd
+    .command('eject')
+    .description('Copy an official adapter to ~/.opencli/clis/ for local editing')
+    .argument('<site>', 'Site name (e.g. twitter, bilibili)')
+    .action(async (site: string) => {
+      const os = await import('node:os');
+      const userClisDir = path.join(os.homedir(), '.opencli', 'clis');
+      const builtinSiteDir = path.join(BUILTIN_CLIS, site);
+      const userSiteDir = path.join(userClisDir, site);
+
+      try {
+        await fs.promises.access(builtinSiteDir);
+      } catch {
+        console.error(styleText('red', `Error: Site "${site}" not found in official adapters.`));
+        process.exitCode = EXIT_CODES.USAGE_ERROR;
+        return;
+      }
+
+      try {
+        await fs.promises.access(userSiteDir);
+        console.error(styleText('yellow', `Site "${site}" already exists in ~/.opencli/clis/. Use "opencli adapter reset ${site}" first to restore official version.`));
+        process.exitCode = EXIT_CODES.USAGE_ERROR;
+        return;
+      } catch { /* good, doesn't exist yet */ }
+
+      fs.cpSync(builtinSiteDir, userSiteDir, { recursive: true });
+      console.log(styleText('green', `✅ Ejected "${site}" to ~/.opencli/clis/${site}/`));
+      console.log('You can now edit the adapter files. Changes take effect immediately.');
+      console.log(styleText('yellow', 'Note: Official updates to this adapter will overwrite your changes.'));
+    });
+
+  adapterCmd
+    .command('reset')
+    .description('Remove local override and restore official adapter version')
+    .argument('<site>', 'Site name (e.g. twitter, bilibili)')
+    .option('--all', 'Reset all local overrides')
+    .action(async (site: string, opts: { all?: boolean }) => {
+      const os = await import('node:os');
+      const userClisDir = path.join(os.homedir(), '.opencli', 'clis');
+
+      if (opts.all) {
+        try {
+          const entries = await fs.promises.readdir(userClisDir, { withFileTypes: true });
+          const dirs = entries.filter(e => e.isDirectory());
+          if (dirs.length === 0) {
+            console.log('No local overrides to reset.');
+            return;
+          }
+          for (const dir of dirs) {
+            fs.rmSync(path.join(userClisDir, dir.name), { recursive: true, force: true });
+          }
+          console.log(styleText('green', `✅ Reset ${dirs.length} site(s). All adapters now use official baseline.`));
+        } catch {
+          console.log('No local overrides to reset.');
+        }
+        return;
+      }
+
+      const userSiteDir = path.join(userClisDir, site);
+      try {
+        await fs.promises.access(userSiteDir);
+      } catch {
+        console.error(styleText('yellow', `Site "${site}" has no local override.`));
+        return;
+      }
+
+      fs.rmSync(userSiteDir, { recursive: true, force: true });
+      console.log(styleText('green', `✅ Reset "${site}". Now using official baseline.`));
+    });
+
   // ── Built-in: daemon ──────────────────────────────────────────────────────
   const daemonCmd = program.command('daemon').description('Manage the opencli daemon');
   daemonCmd

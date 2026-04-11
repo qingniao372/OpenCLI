@@ -51,10 +51,11 @@ if (argv[0] === 'completion' && argv.length >= 2) {
 // Fast path: --get-completions — read from manifest, skip discovery
 const getCompIdx = process.argv.indexOf('--get-completions');
 if (getCompIdx !== -1) {
-  // Only require manifest for directories that actually exist.
-  // If user clis dir doesn't exist, there are no user adapters to miss.
+  // Only include manifests that actually exist on disk.
+  // With sparse override, the user clis dir may exist but have no manifest.
   const manifestPaths = [getCliManifestPath(BUILTIN_CLIS)];
-  try { fs.accessSync(USER_CLIS); manifestPaths.push(getCliManifestPath(USER_CLIS)); } catch { /* no user dir */ }
+  const userManifest = getCliManifestPath(USER_CLIS);
+  try { fs.accessSync(userManifest); manifestPaths.push(userManifest); } catch { /* no user manifest */ }
   if (hasAllManifests(manifestPaths)) {
     const rest = process.argv.slice(getCompIdx + 1);
     let cursor: number | undefined;
