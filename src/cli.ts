@@ -1005,9 +1005,9 @@ cli({
   adapterCmd
     .command('reset')
     .description('Remove local override and restore official adapter version')
-    .argument('<site>', 'Site name (e.g. twitter, bilibili)')
+    .argument('[site]', 'Site name (e.g. twitter, bilibili)')
     .option('--all', 'Reset all local overrides')
-    .action(async (site: string, opts: { all?: boolean }) => {
+    .action(async (site: string | undefined, opts: { all?: boolean }) => {
       const os = await import('node:os');
       const userClisDir = path.join(os.homedir(), '.opencli', 'clis');
 
@@ -1026,6 +1026,12 @@ cli({
         } catch {
           console.log('No local overrides to reset.');
         }
+        return;
+      }
+
+      if (!site) {
+        console.error(styleText('red', 'Error: Please specify a site name or use --all.'));
+        process.exitCode = EXIT_CODES.USAGE_ERROR;
         return;
       }
 

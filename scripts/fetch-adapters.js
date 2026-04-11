@@ -112,18 +112,45 @@ export function fetchAdapters() {
   const oldHashes = oldManifest?.hashes ?? {};
   mkdirSync(USER_CLIS_DIR, { recursive: true });
 
-  // 1. Smart sync: only copy files whose content has changed or are new
-  let copied = 0;
-  let skipped = 0;
+  // 1. Compute new hashes and detect which sites have changes
   const newHashes = {};
+  const siteFiles = new Map(); // site -> [relPath, ...]
   for (const relPath of newOfficialFiles) {
     const src = join(BUILTIN_CLIS, relPath);
-    const dst = join(USER_CLIS_DIR, relPath);
     const srcHash = fileHash(src);
     newHashes[relPath] = srcHash;
 
-    // Skip if the upstream file hasn't changed since last sync
-    if (oldHashes[relPath] === srcHash && existsSync(dst)) {
+    const site = relPath.split('/')[0];
+    if (!siteFiles.has(site)) siteFiles.set(site, []);
+    siteFiles.get(site).push(relPath);
+  }
+
+  // Determine which sites have any changed/new/removed files
+  const changedSites = new Set();
+  for (const [site, files] of siteFiles) {
+    for (const relPath of files) {
+      if (oldHashes[relPath] !== newHashes[relPath]) {
+        changedSites.add(site);
+        break;
+      }
+    }
+  }
+  // Also mark sites that had files removed
+  for (const relPath of oldOfficialFiles) {
+    if (!newOfficialFiles.has(relPath)) {
+      changedSites.add(relPath.split('/')[0]);
+    }
+  }
+
+  // 2. Site-level sync: if any file in a site changed, overwrite the entire site
+  let copied = 0;
+  let skipped = 0;
+  for (const relPath of newOfficialFiles) {
+    const site = relPath.split('/')[0];
+    const src = join(BUILTIN_CLIS, relPath);
+    const dst = join(USER_CLIS_DIR, relPath);
+
+    if (!changedSites.has(site) && existsSync(dst)) {
       skipped++;
       continue;
     }
