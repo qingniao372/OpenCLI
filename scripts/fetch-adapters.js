@@ -21,7 +21,7 @@
 
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, relative } from 'node:path';
 import { homedir } from 'node:os';
 
 const OPENCLI_DIR = join(homedir(), '.opencli');
@@ -82,8 +82,11 @@ function walkFiles(dir, prefix = '') {
  * Remove empty parent directories up to (but not including) stopAt.
  */
 function pruneEmptyDirs(filePath, stopAt) {
-  let dir = dirname(filePath);
-  while (dir !== stopAt && dir.startsWith(stopAt)) {
+  const boundary = resolve(stopAt);
+  let dir = resolve(dirname(filePath));
+  while (dir !== boundary) {
+    const rel = relative(boundary, dir);
+    if (!rel || rel.startsWith('..')) break;
     try {
       const entries = readdirSync(dir);
       if (entries.length > 0) break;
