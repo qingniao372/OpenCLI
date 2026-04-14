@@ -13417,6 +13417,39 @@
   },
   {
     "site": "twitter",
+    "name": "lists",
+    "description": "Get Twitter/X lists for a user",
+    "domain": "x.com",
+    "strategy": "cookie",
+    "browser": true,
+    "args": [
+      {
+        "name": "user",
+        "type": "string",
+        "required": false,
+        "positional": true,
+        "help": ""
+      },
+      {
+        "name": "limit",
+        "type": "int",
+        "default": 50,
+        "required": false,
+        "help": ""
+      }
+    ],
+    "columns": [
+      "name",
+      "members",
+      "followers",
+      "mode"
+    ],
+    "type": "js",
+    "modulePath": "twitter/lists.js",
+    "sourceFile": "twitter/lists.js"
+  },
+  {
+    "site": "twitter",
     "name": "notifications",
     "description": "Get Twitter/X notifications",
     "domain": "x.com",
