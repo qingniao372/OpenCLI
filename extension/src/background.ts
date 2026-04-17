@@ -118,7 +118,9 @@ function scheduleReconnect(): void {
 // ─── Automation window isolation ─────────────────────────────────────
 // All opencli operations happen in a dedicated Chrome window so the
 // user's active browsing session is never touched.
-// The window auto-closes after 120s of idle (no commands).
+// The window auto-closes after a period of idle (no commands).
+// Interactive workspaces (browser:*, operate:*) get a longer timeout (10 min)
+// since users type commands manually; adapter workspaces keep a short 30s timeout.
 
 type AutomationSession = {
   windowId: number;
@@ -129,7 +131,24 @@ type AutomationSession = {
 };
 
 const automationSessions = new Map<string, AutomationSession>();
-const WINDOW_IDLE_TIMEOUT = 30000; // 30s — quick cleanup after command finishes
+const IDLE_TIMEOUT_DEFAULT = 30_000;      // 30s — adapter-driven automation
+const IDLE_TIMEOUT_INTERACTIVE = 600_000; // 10min — human-paced browser:* / operate:*
+
+/** Per-workspace custom timeout overrides set via command.idleTimeout */
+const workspaceTimeoutOverrides = new Map<string, number>();
+
+function getIdleTimeout(workspace: string): number {
+  const override = workspaceTimeoutOverrides.get(workspace);
+  if (override !== undefined) return override;
+  if (workspace.startsWith('browser:') || workspace.startsWith('operate:')) {
+    return IDLE_TIMEOUT_INTERACTIVE;
+  }
+  return IDLE_TIMEOUT_DEFAULT;
+}
+
+/** Tracks workspaces whose sessions expired (idle timeout or SW restart). */
+const expiredWorkspaces = new Set<string>();
+
 let windowFocused = false; // set per-command from daemon's OPENCLI_WINDOW_FOCUSED
 
 function getWorkspaceKey(workspace?: string): string {
@@ -140,7 +159,8 @@ function resetWindowIdleTimer(workspace: string): void {
   const session = automationSessions.get(workspace);
   if (!session) return;
   if (session.idleTimer) clearTimeout(session.idleTimer);
-  session.idleDeadlineAt = Date.now() + WINDOW_IDLE_TIMEOUT;
+  const timeout = getIdleTimeout(workspace);
+  session.idleDeadlineAt = Date.now() + timeout;
   session.idleTimer = setTimeout(async () => {
     const current = automationSessions.get(workspace);
     if (!current) return;
@@ -151,12 +171,13 @@ function resetWindowIdleTimer(workspace: string): void {
     }
     try {
       await chrome.windows.remove(current.windowId);
-      console.log(`[opencli] Automation window ${current.windowId} (${workspace}) closed (idle timeout)`);
+      console.log(`[opencli] Automation window ${current.windowId} (${workspace}) closed (idle timeout, ${timeout / 1000}s)`);
     } catch {
       // Already gone
     }
+    expiredWorkspaces.add(workspace);
     automationSessions.delete(workspace);
-  }, WINDOW_IDLE_TIMEOUT);
+  }, timeout);
 }
 
 /** Get or create the dedicated automation window.
@@ -191,12 +212,13 @@ async function getAutomationWindow(workspace: string, initialUrl?: string): Prom
   const session: AutomationSession = {
     windowId: win.id!,
     idleTimer: null,
-    idleDeadlineAt: Date.now() + WINDOW_IDLE_TIMEOUT,
+    idleDeadlineAt: Date.now() + getIdleTimeout(workspace),
     owned: true,
     preferredTabId: null,
   };
   automationSessions.set(workspace, session);
-  console.log(`[opencli] Created automation window ${session.windowId} (${workspace}, start=${startUrl})`);
+  const wasExpired = expiredWorkspaces.delete(workspace);
+  console.log(`[opencli] Created automation window ${session.windowId} (${workspace}, start=${startUrl}${wasExpired ? ', previous session expired' : ''})`);
   resetWindowIdleTimer(workspace);
   // Wait for the initial tab to finish loading instead of a fixed 200ms sleep.
   const tabs = await chrome.tabs.query({ windowId: win.id! });
@@ -280,46 +302,58 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 async function handleCommand(cmd: Command): Promise<Result> {
   const workspace = getWorkspaceKey(cmd.workspace);
   windowFocused = cmd.windowFocused === true;
+  // Apply custom idle timeout if specified in the command
+  if (cmd.idleTimeout != null && cmd.idleTimeout > 0) {
+    workspaceTimeoutOverrides.set(workspace, cmd.idleTimeout * 1000);
+  }
+  // Check if previous session expired before this command arrived
+  const wasExpired = expiredWorkspaces.has(workspace);
   // Reset idle timer on every command (window stays alive while active)
   resetWindowIdleTimer(workspace);
+  let result: Result;
   try {
     switch (cmd.action) {
       case 'exec':
-        return await handleExec(cmd, workspace);
+        result = await handleExec(cmd, workspace); break;
       case 'navigate':
-        return await handleNavigate(cmd, workspace);
+        result = await handleNavigate(cmd, workspace); break;
       case 'tabs':
-        return await handleTabs(cmd, workspace);
+        result = await handleTabs(cmd, workspace); break;
       case 'cookies':
-        return await handleCookies(cmd);
+        result = await handleCookies(cmd); break;
       case 'screenshot':
-        return await handleScreenshot(cmd, workspace);
+        result = await handleScreenshot(cmd, workspace); break;
       case 'close-window':
-        return await handleCloseWindow(cmd, workspace);
+        result = await handleCloseWindow(cmd, workspace); break;
       case 'cdp':
-        return await handleCdp(cmd, workspace);
+        result = await handleCdp(cmd, workspace); break;
       case 'sessions':
-        return await handleSessions(cmd);
+        result = await handleSessions(cmd); break;
       case 'set-file-input':
-        return await handleSetFileInput(cmd, workspace);
+        result = await handleSetFileInput(cmd, workspace); break;
       case 'insert-text':
-        return await handleInsertText(cmd, workspace);
+        result = await handleInsertText(cmd, workspace); break;
       case 'bind-current':
-        return await handleBindCurrent(cmd, workspace);
+        result = await handleBindCurrent(cmd, workspace); break;
       case 'network-capture-start':
-        return await handleNetworkCaptureStart(cmd, workspace);
+        result = await handleNetworkCaptureStart(cmd, workspace); break;
       case 'network-capture-read':
-        return await handleNetworkCaptureRead(cmd, workspace);
+        result = await handleNetworkCaptureRead(cmd, workspace); break;
       default:
-        return { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` };
+        result = { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` }; break;
     }
   } catch (err) {
-    return {
+    result = {
       id: cmd.id,
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     };
   }
+  // Flag when a new window was created because the previous session expired
+  if (wasExpired && expiredWorkspaces.delete(workspace)) {
+    result.sessionExpired = true;
+  }
+  return result;
 }
 
 // ─── Action handlers ─────────────────────────────────────────────────
@@ -387,7 +421,7 @@ function setWorkspaceSession(workspace: string, session: Omit<AutomationSession,
   automationSessions.set(workspace, {
     ...session,
     idleTimer: null,
-    idleDeadlineAt: Date.now() + WINDOW_IDLE_TIMEOUT,
+    idleDeadlineAt: Date.now() + getIdleTimeout(workspace),
   });
 }
 
