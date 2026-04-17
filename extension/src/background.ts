@@ -166,6 +166,7 @@ function resetWindowIdleTimer(workspace: string): void {
     if (!current) return;
     if (!current.owned) {
       console.log(`[opencli] Borrowed workspace ${workspace} detached from window ${current.windowId} (idle timeout)`);
+      workspaceTimeoutOverrides.delete(workspace);
       automationSessions.delete(workspace);
       return;
     }
@@ -176,6 +177,7 @@ function resetWindowIdleTimer(workspace: string): void {
       // Already gone
     }
     expiredWorkspaces.add(workspace);
+    workspaceTimeoutOverrides.delete(workspace);
     automationSessions.delete(workspace);
   }, timeout);
 }
@@ -217,7 +219,7 @@ async function getAutomationWindow(workspace: string, initialUrl?: string): Prom
     preferredTabId: null,
   };
   automationSessions.set(workspace, session);
-  const wasExpired = expiredWorkspaces.delete(workspace);
+  const wasExpired = expiredWorkspaces.has(workspace);
   console.log(`[opencli] Created automation window ${session.windowId} (${workspace}, start=${startUrl}${wasExpired ? ', previous session expired' : ''})`);
   resetWindowIdleTimer(workspace);
   // Wait for the initial tab to finish loading instead of a fixed 200ms sleep.
@@ -350,7 +352,8 @@ async function handleCommand(cmd: Command): Promise<Result> {
     };
   }
   // Flag when a new window was created because the previous session expired
-  if (wasExpired && expiredWorkspaces.delete(workspace)) {
+  if (wasExpired) {
+    expiredWorkspaces.delete(workspace);
     result.sessionExpired = true;
   }
   return result;
@@ -815,6 +818,7 @@ async function handleCloseWindow(cmd: Command, workspace: string): Promise<Resul
       }
     }
     if (session.idleTimer) clearTimeout(session.idleTimer);
+    workspaceTimeoutOverrides.delete(workspace);
     automationSessions.delete(workspace);
   }
   return { id: cmd.id, ok: true, data: { closed: true } };
@@ -920,6 +924,10 @@ export const __test__ = {
   handleBindCurrent,
   resolveTabId,
   resetWindowIdleTimer,
+  handleCommand,
+  getIdleTimeout,
+  expiredWorkspaces,
+  workspaceTimeoutOverrides,
   getSession: (workspace: string = 'default') => automationSessions.get(workspace) ?? null,
   getAutomationWindowId: (workspace: string = 'default') => automationSessions.get(workspace)?.windowId ?? null,
   setAutomationWindowId: (workspace: string, windowId: number | null) => {

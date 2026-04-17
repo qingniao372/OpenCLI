@@ -332,4 +332,109 @@ describe('background tab isolation', () => {
     expect(chrome.windows.remove).toHaveBeenCalledWith(1);
     expect(mod.__test__.getSession('site:notebooklm')).toBeNull();
   });
+
+  it('uses 10-minute timeout for browser:* workspaces', async () => {
+    const { chrome } = createChromeMock();
+    vi.useFakeTimers();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    mod.__test__.setAutomationWindowId('browser:default', 1);
+
+    mod.__test__.resetWindowIdleTimer('browser:default');
+    // After 30s (adapter timeout), session should still be alive
+    await vi.advanceTimersByTimeAsync(30001);
+    expect(mod.__test__.getSession('browser:default')).not.toBeNull();
+
+    // After 10 min total, session should be cleaned up
+    await vi.advanceTimersByTimeAsync(600000 - 30001);
+    expect(chrome.windows.remove).toHaveBeenCalledWith(1);
+    expect(mod.__test__.getSession('browser:default')).toBeNull();
+  });
+
+  it('sets sessionExpired flag when session was expired before command', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+
+    // Simulate: a session expired (added to expiredWorkspaces)
+    mod.__test__.expiredWorkspaces.add('browser:default');
+
+    // Send a navigate command — should get sessionExpired=true in the result
+    const result = await mod.__test__.handleCommand({
+      id: 'test-1',
+      action: 'navigate',
+      url: 'https://example.com',
+      workspace: 'browser:default',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.sessionExpired).toBe(true);
+    // Flag should be consumed
+    expect(mod.__test__.expiredWorkspaces.has('browser:default')).toBe(false);
+  });
+
+  it('clears workspaceTimeoutOverrides on idle expiry', async () => {
+    const { chrome } = createChromeMock();
+    vi.useFakeTimers();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    mod.__test__.setAutomationWindowId('browser:test', 1);
+
+    // Set a custom timeout override
+    mod.__test__.workspaceTimeoutOverrides.set('browser:test', 120_000);
+    expect(mod.__test__.getIdleTimeout('browser:test')).toBe(120_000);
+
+    // Trigger idle timer with the custom timeout
+    mod.__test__.resetWindowIdleTimer('browser:test');
+    await vi.advanceTimersByTimeAsync(120001);
+
+    // Override should be cleaned up
+    expect(mod.__test__.workspaceTimeoutOverrides.has('browser:test')).toBe(false);
+    expect(mod.__test__.getSession('browser:test')).toBeNull();
+    // Should fall back to default interactive timeout
+    expect(mod.__test__.getIdleTimeout('browser:test')).toBe(600_000);
+  });
+
+  it('clears workspaceTimeoutOverrides on explicit close', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    mod.__test__.setAutomationWindowId('browser:close-test', 1);
+    mod.__test__.workspaceTimeoutOverrides.set('browser:close-test', 300_000);
+
+    const result = await mod.__test__.handleCommand({
+      id: 'close-1',
+      action: 'close-window',
+      workspace: 'browser:close-test',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mod.__test__.workspaceTimeoutOverrides.has('browser:close-test')).toBe(false);
+  });
+
+  it('applies idleTimeout from command to workspace override', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    mod.__test__.setAutomationWindowId('browser:custom', 1);
+
+    // Default for browser:* is 10 min
+    expect(mod.__test__.getIdleTimeout('browser:custom')).toBe(600_000);
+
+    // Send a command with custom idleTimeout (in seconds)
+    await mod.__test__.handleCommand({
+      id: 'custom-1',
+      action: 'sessions',
+      workspace: 'browser:custom',
+      idleTimeout: 120,
+    });
+
+    // Override should now be 120s = 120000ms
+    expect(mod.__test__.getIdleTimeout('browser:custom')).toBe(120_000);
+  });
 });
