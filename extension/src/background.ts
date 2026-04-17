@@ -248,6 +248,7 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
       console.log(`[opencli] Automation window closed (${workspace})`);
       if (session.idleTimer) clearTimeout(session.idleTimer);
       automationSessions.delete(workspace);
+      workspaceTimeoutOverrides.delete(workspace);
     }
   }
 });

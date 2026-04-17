@@ -414,4 +414,26 @@ describe('background tab isolation', () => {
     // Override should now be 120s = 120000ms
     expect(mod.__test__.getIdleTimeout('browser:custom')).toBe(120_000);
   });
+
+  it('clears workspaceTimeoutOverrides when user manually closes automation window', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+
+    // Set up a session with window ID 42 and a custom timeout override
+    mod.__test__.setAutomationWindowId('browser:manual', 42);
+    mod.__test__.workspaceTimeoutOverrides.set('browser:manual', 180_000);
+    expect(mod.__test__.getIdleTimeout('browser:manual')).toBe(180_000);
+
+    // Simulate user closing the window — invoke the onRemoved listener
+    const onRemovedListener = chrome.windows.onRemoved.addListener.mock.calls[0][0];
+    await onRemovedListener(42);
+
+    // Session and override should both be cleaned up
+    expect(mod.__test__.getSession('browser:manual')).toBeNull();
+    expect(mod.__test__.workspaceTimeoutOverrides.has('browser:manual')).toBe(false);
+    // Should fall back to default interactive timeout
+    expect(mod.__test__.getIdleTimeout('browser:manual')).toBe(600_000);
+  });
 });
