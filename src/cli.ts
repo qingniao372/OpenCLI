@@ -27,8 +27,15 @@ import { log } from './logger.js';
 
 const CLI_FILE = fileURLToPath(import.meta.url);
 
-/** Create a browser page for browser commands. Uses a dedicated browser workspace for session persistence. */
+/** Create a browser page for browser commands. Uses a dedicated browser workspace for session persistence.
+ *  When OPENCLI_CDP_ENDPOINT is set, connects to an external Chrome via CDP instead of BrowserBridge. */
 async function getBrowserPage(): Promise<import('./types.js').IPage> {
+  const cdpEndpoint = process.env.OPENCLI_CDP_ENDPOINT;
+  if (cdpEndpoint) {
+    const { CDPBridge } = await import('./browser/index.js');
+    const bridge = new CDPBridge();
+    return bridge.connect({ cdpEndpoint: cdpEndpoint, timeout: 30, workspace: 'browser:default' });
+  }
   const { BrowserBridge } = await import('./browser/index.js');
   const bridge = new BrowserBridge();
   const envTimeout = process.env.OPENCLI_BROWSER_TIMEOUT;
