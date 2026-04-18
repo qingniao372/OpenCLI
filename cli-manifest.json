@@ -3250,7 +3250,7 @@
       {
         "name": "op",
         "type": "str",
-        "default": "/Users/jakevin/Pictures/chatgpt",
+        "default": "/opt/data/home/Pictures/chatgpt",
         "required": false,
         "help": "Output directory"
       },
@@ -6169,7 +6169,7 @@
       {
         "name": "op",
         "type": "str",
-        "default": "/Users/jakevin/tmp/gemini-images",
+        "default": "/opt/data/home/tmp/gemini-images",
         "required": false,
         "help": "Output directory shorthand"
       },
@@ -6439,6 +6439,45 @@
     "type": "js",
     "modulePath": "google/trends.js",
     "sourceFile": "google/trends.js"
+  },
+  {
+    "site": "google",
+    "name": "trends-search",
+    "description": "Search Google Trends for a keyword: interest over time, related queries & topics",
+    "strategy": "ui",
+    "browser": true,
+    "args": [
+      {
+        "name": "query",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Keyword to search"
+      },
+      {
+        "name": "geo",
+        "type": "str",
+        "default": "US",
+        "required": false,
+        "help": "Region code (US, CN, GB, etc.)"
+      },
+      {
+        "name": "months",
+        "type": "int",
+        "default": 12,
+        "required": false,
+        "help": "Time range in months (1-60)"
+      }
+    ],
+    "columns": [
+      "metric",
+      "value",
+      "details"
+    ],
+    "type": "js",
+    "modulePath": "google/trends-search.js",
+    "sourceFile": "google/trends-search.js",
+    "navigateBefore": true
   },
   {
     "site": "google-scholar",
@@ -7450,7 +7489,7 @@
       {
         "name": "path",
         "type": "str",
-        "default": "/Users/jakevin/Downloads/Instagram",
+        "default": "/opt/data/home/Downloads/Instagram",
         "required": false,
         "help": "Download directory"
       }
