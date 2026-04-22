@@ -415,6 +415,32 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
       }
     }));
 
+  browser.command('images')
+    .option('--limit <n>', 'Maximum number of images to return')
+    .option('--json', 'Output in JSON format')
+    .description('Extract all image URLs and alt text from the page')
+    .action(browserAction(async (page, opts) => {
+      const limit = opts.limit ? parseInt(opts.limit, 10) : undefined;
+      const images = await page.evaluate(`JSON.stringify(
+        Array.from(document.querySelectorAll('img')).map((el, i) => ({
+          index: i + 1,
+          src: el.src || '',
+          alt: el.alt || ''
+        }))
+      )`);
+      let parsed = JSON.parse(images);
+      if (limit && limit > 0) parsed = parsed.slice(0, limit);
+      if (opts.json) {
+        console.log(JSON.stringify(parsed, null, 2));
+      } else if (parsed.length === 0) {
+        console.log('(no images found)');
+      } else {
+        for (const img of parsed) {
+          console.log(`[${img.index}] ${img.src} | ${img.alt}`);
+        }
+      }
+    }));
+
   // ── Get commands (structured data extraction) ──
 
   const get = browser.command('get').description('Get page properties');
