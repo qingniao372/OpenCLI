@@ -11,18 +11,18 @@
 OpenCLI 可以用同一套 CLI 做三类事情：
 
 - **直接使用现成适配器**：B站、知乎、小红书、Twitter/X、Reddit、HackerNews 等 [90+ 站点](#内置命令) 开箱即用。
-- **直接驱动浏览器**：用 `opencli browser` 让 AI Agent 实时点击、输入、提取、截图、检查页面状态。
-- **把新网站生成成 CLI**：通过 `explore`、`synthesize`、`generate`、`cascade` 从真实页面行为推导出新的适配器。
+- **让 AI Agent 操作任意网站**：在你的 AI Agent（Claude Code、Cursor 等）中安装 `opencli-adapter-author` skill，Agent 就能用你的已登录浏览器导航、点击、输入、提取任意网页内容。
+- **把新网站写成 CLI**：用 `opencli browser` 原语 + `opencli-adapter-author` skill，从站点侦察、API 发现、字段解码到 `opencli browser verify` 一条龙。
 
 除了网站能力，OpenCLI 还是一个 **CLI 枢纽**：你可以把 `gh`、`docker` 等本地工具统一注册到 `opencli` 下，也可以通过桌面端适配器控制 Cursor、Codex、Antigravity、ChatGPT、Notion 等 Electron 应用。
 
 ## 亮点
 
 - **桌面应用控制** — 通过 CDP 直接在终端驱动 Electron 应用（Cursor、Codex、ChatGPT、Notion 等）。
-- **浏览器自动化** — `browser` 让 AI Agent 直接控制浏览器：点击、输入、提取、截图，完全可编程。
-- **网站 → CLI** — 把任何网站变成确定性 CLI：90+ 内置适配器，或用 `opencli generate` 生成新的。
+- **AI Agent 浏览器自动化** — 安装 `opencli-adapter-author` skill，你的 AI Agent 就能操作任意网站：导航、点击、输入、提取、截图——全部通过你的已登录 Chrome 会话完成。
+- **网站 → CLI** — 把任何网站变成确定性 CLI：90+ 内置适配器，或用 `opencli-adapter-author` skill + `opencli browser verify` 自己写。
 - **账号安全** — 复用 Chrome/Chromium 登录态，凭证永远不会离开浏览器。
-- **面向 AI Agent** — `explore` 发现 API，`synthesize` 生成适配器，`cascade` 探测认证策略，`browser` 直接控制浏览器。
+- **面向 AI Agent** — 一个 skill 带你走完站点侦察、API 发现、字段解码、适配器编写、验证的全流程。
 - **CLI 枢纽** — 统一发现、自动安装、纯透传任何外部 CLI（gh、docker、obsidian 等）。
 - **零 LLM 成本** — 运行时不消耗模型 token，跑 10,000 次也不花一分钱。
 - **确定性输出** — 相同命令，相同输出结构，每次一致。可管道、可脚本、CI 友好。
@@ -68,12 +68,9 @@ opencli bilibili hot --limit 5
 
 ## 给 AI Agent
 
-按任务类型，AI Agent 有两个不同入口：
+OpenCLI 的 browser 命令是给 AI Agent 用的——不是手动执行的。把 skill 安装到你的 AI Agent（Claude Code、Cursor 等）中，Agent 就能用你的已登录 Chrome 会话替你操作网站。
 
-- [`skills/opencli-explorer/SKILL.md`](./skills/opencli-explorer/SKILL.md)：适配器创建入口，支持全自动生成（`opencli generate <url>`）和手动探索两种流程。
-- [`skills/opencli-browser/SKILL.md`](./skills/opencli-browser/SKILL.md)：底层控制入口，适合实时操作页面、debug 和人工介入。
-
-安装全部 OpenCLI skills：
+### 安装 skill
 
 ```bash
 npx skills add jackwener/opencli
@@ -82,40 +79,62 @@ npx skills add jackwener/opencli
 或只装需要的 skill：
 
 ```bash
-npx skills add jackwener/opencli --skill opencli-usage
-npx skills add jackwener/opencli --skill opencli-browser
-npx skills add jackwener/opencli --skill opencli-explorer
-npx skills add jackwener/opencli --skill opencli-oneshot
+npx skills add jackwener/opencli --skill opencli-adapter-author
+npx skills add jackwener/opencli --skill opencli-autofix
+npx skills add jackwener/opencli --skill smart-search
 ```
 
-实际使用上：
+### 选择哪个 skill
 
-- 需要把某个站点收成可复用命令时，优先走 `opencli-explorer`（涵盖自动和手动两种路径）
-- 需要直接检查页面、操作页面时，再走 `opencli-browser`
+| Skill | 适用场景 | 你对 AI Agent 说的话 |
+|-------|---------|-------------------|
+| **opencli-adapter-author** | 实时操作任意网站，或为新站点写可复用适配器 | "帮我看看小红书的通知" / "帮我做一个抖音热门的适配器" / "帮我做一个抓取这个页面热帖的命令" |
+| **opencli-autofix** | 内置命令失败时修复已有适配器 | "`opencli zhihu hot` 返回空了，修一下" |
+| **smart-search** | 在现有 OpenCLI 能力里搜索 | "帮我找个 B 站热门相关的适配器" |
 
-`browser` 可用命令包括：`open`、`state`、`click`、`type`、`select`、`keys`、`wait`、`get`、`screenshot`、`scroll`、`back`、`eval`、`network`、`init`、`verify`、`close`。
+### 工作原理
+
+安装 `opencli-adapter-author` skill 后，你的 AI Agent 可以：
+
+1. **导航**到任意 URL，使用你的已登录浏览器
+2. **读取**页面内容——通过结构化 DOM 快照（不是截图）
+3. **交互**——点击按钮、填写表单、选择选项、按键
+4. **提取**页面数据或拦截网络 API 响应
+5. **等待**元素、文本或页面跳转
+
+Agent 在内部自动处理所有 `opencli browser` 命令——你只需用自然语言描述想做的事。
+
+**Skill 参考文档：**
+- [`skills/opencli-adapter-author/SKILL.md`](./skills/opencli-adapter-author/SKILL.md) — 浏览器操作 + 适配器编写，全流程
+- [`skills/opencli-autofix/SKILL.md`](./skills/opencli-autofix/SKILL.md) — 修复已有适配器
+- [`skills/smart-search/SKILL.md`](./skills/smart-search/SKILL.md) — 能力搜索
+
+`browser` 可用命令包括：`open`、`state`、`click`、`type`、`select`、`keys`、`wait`、`get`、`screenshot`、`scroll`、`back`、`eval`、`network`、`tab list`、`tab new`、`tab select`、`tab close`、`init`、`verify`、`close`。
+
+`opencli browser open <url>` 和 `opencli browser tab new [url]` 都会返回 target ID。`opencli browser tab list` 用来查看当前已存在 tab 的 target ID，再通过 `--tab <targetId>` 把命令明确路由到某个 tab。`tab new` 只会新建 tab，不会改变默认浏览器目标；只有显式执行 `tab select <targetId>`，才会把该 tab 设为后续未指定 target 的 `opencli browser ...` 命令的默认目标。
 
 ## 核心概念
 
-### `browser`：实时操作
+### `browser`：AI Agent 的浏览器控制层
 
-当任务本身就是交互式页面操作时，使用 `opencli browser` 直接驱动浏览器。
+`opencli browser` 命令是 AI Agent 操作网站的底层原语。你不需要手动运行这些命令——把 `opencli-adapter-author` skill 安装到你的 AI Agent 中，用自然语言描述你想做的事，Agent 会自动处理浏览器操作。
+
+比如你告诉 Agent：*"帮我看看小红书的通知"*——Agent 会在底层调用 `opencli browser open`、`state`、`click` 等命令。
 
 ### 内置适配器：稳定命令
 
-当某个站点能力已经存在时，优先使用 `opencli hackernews top`、`opencli reddit hot` 这类稳定命令，而不是重新走一遍浏览器操作。
+当某个站点能力已经存在时，优先使用 `opencli hackernews top`、`opencli reddit hot` 这类稳定命令。这些命令是确定性的，无需浏览器——人类和 AI Agent 都可以直接使用。
 
-### `explore` / `synthesize` / `generate`：生成新的 CLI
+### 为新站点写适配器
 
-当你需要的网站还没覆盖时：
+当你需要的网站还没覆盖时，用 `opencli-adapter-author` skill，它会把 Agent 带到闭环：
 
-- `explore` 负责观察页面、网络请求和能力边界
-- `synthesize` 负责把探索结果转成 evaluate-based YAML 适配器
-- `generate` 负责跑通 verified generation 主链路，最后要么给出可直接使用的命令，要么返回结构化的阻塞原因 / 人工介入结果
-
-### `cascade`：认证策略探测
-
-用 `cascade` 去判断某个能力应该优先走公开接口、Cookie 还是自定义 Header，而不是一开始就把适配器写死。
+1. 侦察站点，分类 pattern（SPA / SSR / JSONP / Token / Streaming）
+2. 发现目标 endpoint——network 精读、initial state、bundle 搜索、token 溯源，或 interceptor 兜底
+3. 定认证策略——`PUBLIC` / `COOKIE` / `HEADER` / `INTERCEPT`
+4. 字段解码 + 设计输出列
+5. `opencli browser init <site>/<name>` → 写适配器 → `opencli browser verify <site>/<name>`
+6. 把站点知识沉到 `~/.opencli/sites/<site>/`，下次写同站点的其他命令直接吃缓存
 
 ### CLI 枢纽与桌面端适配器
 
@@ -136,15 +155,17 @@ OpenCLI 不只是网站 CLI，还可以：
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `OPENCLI_DAEMON_PORT` | `19825` | daemon-extension 通信端口 |
-| `OPENCLI_WINDOW_FOCUSED` | `false` | 设为 `1` 时 automation 窗口在前台打开（适合调试） |
+| `OPENCLI_WINDOW_FOCUSED` | `false` | 设为 `1` 时 automation 窗口在前台打开（适合调试）。`--focus` 标志会设置此变量 |
+| `OPENCLI_LIVE` | `false` | 设为 `1` 时 adapter 命令执行完后保留 automation 窗口不关闭（适合检查页面）。`--live` 标志会设置此变量 |
 | `OPENCLI_BROWSER_CONNECT_TIMEOUT` | `30` | 浏览器连接超时（秒） |
 | `OPENCLI_BROWSER_COMMAND_TIMEOUT` | `60` | 单个浏览器命令超时（秒） |
-| `OPENCLI_BROWSER_EXPLORE_TIMEOUT` | `120` | explore/record 操作超时（秒） |
 | `OPENCLI_CDP_ENDPOINT` | — | Chrome DevTools Protocol 端点，用于远程浏览器或 Electron 应用 |
 | `OPENCLI_CDP_TARGET` | — | 按 URL 子串过滤 CDP target（如 `detail.1688.com`） |
 | `OPENCLI_VERBOSE` | `false` | 启用详细日志（`-v` 也可以） |
 | `OPENCLI_DIAGNOSTIC` | `false` | 设为 `1` 时在失败时输出结构化诊断上下文 |
 | `DEBUG_SNAPSHOT` | — | 设为 `1` 输出 DOM 快照调试信息 |
+
+`--focus` 同时适用于 `opencli browser *` 和浏览器型 adapter 命令。`--live` 主要是给 adapter 命令用的：`browser` 子命令本来就会一直保留 automation window，直到你手动执行 `opencli browser close` 或等空闲超时。
 
 ## 更新
 
@@ -158,10 +179,9 @@ npx skills add jackwener/opencli
 如果你只装了部分 skill，也可以只刷新自己在用的：
 
 ```bash
-npx skills add jackwener/opencli --skill opencli-usage
-npx skills add jackwener/opencli --skill opencli-browser
-npx skills add jackwener/opencli --skill opencli-explorer
-npx skills add jackwener/opencli --skill opencli-oneshot
+npx skills add jackwener/opencli --skill opencli-adapter-author
+npx skills add jackwener/opencli --skill opencli-autofix
+npx skills add jackwener/opencli --skill smart-search
 ```
 
 ## 面向开发者
@@ -187,12 +207,12 @@ npm link
 
 | 站点 | 命令 | 模式 |
 |------|------|------|
-| **twitter** | `trending` `search` `timeline` `lists` `bookmarks` `profile` `thread` `following` `followers` `notifications` `post` `reply` `delete` `like` `likes` `article` `follow` `unfollow` `bookmark` `unbookmark` `download` `accept` `reply-dm` `block` `unblock` `hide-reply` | 浏览器 |
+| **twitter** | `trending` `search` `timeline` `lists` `list-tweets` `list-add` `list-remove` `bookmarks` `profile` `thread` `following` `followers` `notifications` `post` `reply` `delete` `like` `likes` `article` `follow` `unfollow` `bookmark` `unbookmark` `download` `accept` `reply-dm` `block` `unblock` `hide-reply` | 浏览器 |
 | **reddit** | `hot` `frontpage` `popular` `search` `subreddit` `read` `user` `user-posts` `user-comments` `upvote` `save` `comment` `subscribe` `saved` `upvoted` | 浏览器 |
 | **tieba** | `hot` `posts` `search` `read` | 浏览器 |
 | **hupu** | `hot` `search` `detail` `mentions` `reply` `like` `unlike` | 浏览器 |
 | **cursor** | `status` `send` `read` `new` `dump` `composer` `model` `extract-code` `ask` `screenshot` `history` `export` | 桌面端 |
-| **bilibili** | `hot` `search` `me` `favorite` `history` `feed` `subtitle` `dynamic` `ranking` `following` `user-videos` `download` | 浏览器 |
+| **bilibili** | `hot` `search` `me` `favorite` `history` `feed` `subtitle` `video` `dynamic` `ranking` `following` `user-videos` `download` | 浏览器 |
 | **codex** | `status` `send` `read` `new` `dump` `extract-diff` `model` `ask` `screenshot` `history` `export` | 桌面端 |
 | **chatwise** | `status` `new` `send` `read` `ask` `model` `history` `export` `screenshot` | 桌面端 |
 | **doubao** | `status` `new` `send` `read` `ask` `history` `detail` `meeting-summary` `meeting-transcript` | 浏览器 |
@@ -454,25 +474,15 @@ opencli plugin uninstall my-tool                            # 卸载
 
 如果你是一个被要求查阅代码并编写新 `opencli` 适配器的 AI，请遵守以下工作流。
 
-> **快速模式**：只想为某个页面快速生成一个命令？看 [opencli-oneshot skill](./skills/opencli-oneshot/SKILL.md) — 给一个 URL + 一句话描述，4 步搞定。
+在动代码前，先读 [`opencli-adapter-author` skill](./skills/opencli-adapter-author/SKILL.md)。它把整个流程串起来：
 
-> **完整模式**：在编写任何新代码前，先阅读 [opencli-explorer skill](./skills/opencli-explorer/SKILL.md)。它包含完整的适配器探索开发指南、API 探测流程、5级认证策略以及常见陷阱。
+- 侦察站点，选定 pattern（SPA / SSR / JSONP / Token / Streaming）
+- 用 `opencli browser network`、`eval`、interceptor 等找到目标 endpoint
+- 定认证策略（`PUBLIC` / `COOKIE` / `HEADER` / `INTERCEPT`）
+- 字段解码、设计 columns、`opencli browser init` 生成骨架
+- 交付前用 `opencli browser verify <site>/<name>` 验证
 
-```bash
-# 1. Deep Explore — 网络拦截 → 响应分析 → 能力推理 → 框架检测
-opencli explore https://example.com --site mysite
-
-# 2. Synthesize — 从探索成果物生成 evaluate-based TS 适配器
-opencli synthesize mysite
-
-# 3. Generate — 一键完成：探索 → 合成 → 注册
-opencli generate https://example.com --goal "hot"
-
-# 4. Strategy Cascade — 自动降级探测：PUBLIC → COOKIE → HEADER
-opencli cascade https://api.example.com/data
-```
-
-探索结果输出到 `.opencli/explore/<site>/`。
+在仓库外写的私有适配器放到 `~/.opencli/clis/<site>/<name>.js`；每个站点的 endpoint、字段映射、抓包样本会累积在 `~/.opencli/sites/<site>/`，下次写同站点的其他命令可以直接复用。
 
 ## 常见问题排查
 
