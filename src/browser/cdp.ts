@@ -116,7 +116,7 @@ export class CDPBridge implements IBrowserFactory {
 
   async close(): Promise<void> {
     if (this._ws) {
-      this._ws.close();
+      this._ws.terminate();
       this._ws = null;
     }
     for (const p of this._pending.values()) {

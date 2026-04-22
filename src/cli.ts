@@ -28,23 +28,26 @@ import { log } from './logger.js';
 const CLI_FILE = fileURLToPath(import.meta.url);
 
 /** Create a browser page for browser commands. Uses a dedicated browser workspace for session persistence.
- *  When OPENCLI_CDP_ENDPOINT is set, connects to an external Chrome via CDP instead of BrowserBridge. */
-async function getBrowserPage(): Promise<import('./types.js').IPage> {
+ *  When OPENCLI_CDP_ENDPOINT is set, connects to an external Chrome via CDP instead of BrowserBridge.
+ *  Returns both the page and a dispose function that must be called to release the connection. */
+async function getBrowserPage(): Promise<{ page: import('./types.js').IPage; dispose: () => Promise<void> }> {
   const cdpEndpoint = process.env.OPENCLI_CDP_ENDPOINT;
   if (cdpEndpoint) {
     const { CDPBridge } = await import('./browser/index.js');
     const bridge = new CDPBridge();
-    return bridge.connect({ cdpEndpoint: cdpEndpoint, timeout: 30, workspace: 'browser:default' });
+    const page = await bridge.connect({ cdpEndpoint: cdpEndpoint, timeout: 30, workspace: 'browser:default' });
+    return { page, dispose: () => bridge.close() };
   }
   const { BrowserBridge } = await import('./browser/index.js');
   const bridge = new BrowserBridge();
   const envTimeout = process.env.OPENCLI_BROWSER_TIMEOUT;
   const idleTimeout = envTimeout ? parseInt(envTimeout, 10) : undefined;
-  return bridge.connect({
+  const page = await bridge.connect({
     timeout: 30,
     workspace: 'browser:default',
     ...(idleTimeout && idleTimeout > 0 && { idleTimeout }),
   });
+  return { page, dispose: () => bridge.close() };
 }
 
 function parsePositiveIntOption(val: string | undefined, label: string, fallback: number): number {
@@ -318,7 +321,7 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
     .description('Browser control — navigate, click, type, extract, wait (no LLM needed)');
 
   /** Resolve a ref/CSS target via the unified resolver, throwing TargetError on failure. */
-  async function resolveRef(page: Awaited<ReturnType<typeof getBrowserPage>>, ref: string): Promise<void> {
+  async function resolveRef(page: Awaited<ReturnType<typeof getBrowserPage>>['page'], ref: string): Promise<void> {
     const resolution = await page.evaluate(resolveTargetJs(ref)) as
       | { ok: true }
       | { ok: false; code: string; message: string; hint: string; candidates?: string[] };
@@ -328,10 +331,12 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
   }
 
   /** Wrap browser actions with error handling and optional --json output */
-  function browserAction(fn: (page: Awaited<ReturnType<typeof getBrowserPage>>, ...args: any[]) => Promise<unknown>) {
+  function browserAction(fn: (page: Awaited<ReturnType<typeof getBrowserPage>>['page'], ...args: any[]) => Promise<unknown>) {
     return async (...args: any[]) => {
+      let dispose: (() => Promise<void>) | undefined;
       try {
-        const page = await getBrowserPage();
+        const { page, dispose: d } = await getBrowserPage();
+        dispose = d;
         await fn(page, ...args);
       } catch (err) {
         if (err instanceof BrowserConnectError) {
@@ -353,6 +358,8 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
           }
         }
         process.exitCode = EXIT_CODES.GENERIC_ERROR;
+      } finally {
+        await dispose?.();
       }
     };
   }
@@ -664,11 +671,16 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
 
         // Try to detect domain from the last browser session
         let domain = site;
+        let browserDispose: (() => Promise<void>) | undefined;
         try {
-          const page = await getBrowserPage();
+          const { page, dispose } = await getBrowserPage();
+          browserDispose = dispose;
           const url = await page.getCurrentUrl?.();
           if (url) { try { domain = new URL(url).hostname; } catch {} }
         } catch { /* no active session */ }
+        finally {
+          await browserDispose?.();
+        }
 
         const template = `import { cli, Strategy } from '@jackwener/opencli/registry';
 
