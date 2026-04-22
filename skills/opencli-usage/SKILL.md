@@ -1,167 +1,180 @@
 ---
+
 name: opencli-usage
-description: Use at the start of any OpenCLI session — this is the top-level map of what `opencli` can do, how to discover adapters, what flags and output formats are universal, and which specialized skill to load next. Point here when an agent asks "what can opencli do?" or "how do I find the right command?".
+description: OpenCLI 顶层入口——了解 opencli 能做什么、如何发现适配器、通用参数和输出格式。当 agent 问"opencli 能做什么"或"怎么找命令"时加载此 skill。
 allowed-tools: Bash(opencli:*), Read
 ---
 
-# opencli-usage
+# opencli-usage（CDP 直连模式）
 
-OpenCLI turns any website, Electron desktop app, or external CLI into a uniform `opencli <site> <command>` surface that agents can drive without screen-scraping. This skill is the orientation layer — once you know what you want to do, load one of the specialized skills below.
+OpenCLI 将任何网站、Electron 桌面应用或外部 CLI 统一为 `opencli <site> <command>` 接口，agent 无需屏幕抓取即可驱动。
 
-## The three pillars
+**运行模式：CDP 直连**。通过 `OPENCLI_CDP_ENDPOINT` 连接外部 Chrome 实例，不需要扩展、不需要 daemon、不需要 Browser Bridge。
 
-- **Adapter commands** — `opencli <site> <command> [...]`. Built-in adapters live in `clis/`, user adapters in `~/.opencli/clis/`. Each is backed by a strategy (`PUBLIC | COOKIE | HEADER | INTERCEPT | UI | LOCAL`) that tells you whether a Chrome session is needed.
-- **Browser driving** — `opencli browser *` subcommands (`open`, `state`, `click`, `type`, `select`, `find`, `extract`, `network`, …) for ad-hoc interaction and scraping when no adapter covers the task. See `opencli-browser`.
-- **External CLI passthrough** — `opencli gh`, `opencli docker`, `opencli vercel`, etc. Registered via `opencli install <name>` (auto-install from `external-clis.yaml`) or `opencli register <name>` (bring your own).
+## 三大能力
 
-## Install
+| 能力 | 命令形式 | 说明 |
+|------|---------|------|
+| **适配器命令** | `opencli <site> <command>` | 内置 100+ 站点适配器，按 strategy 区分是否需要浏览器 |
+| **浏览器驱动** | `opencli browser *` | 即时交互：导航、点击、填表、提取数据、网络抓包。见 `opencli-browser` |
+| **外部 CLI 透传** | `opencli gh` / `opencli docker` 等 | 通过统一入口调用已注册的外部工具 |
+
+## 安装
 
 ```bash
-# npm global
-npm install -g @jackwener/opencli          # binary: opencli, requires Node >= 21
-opencli doctor                              # run before browser-dependent work (see below)
+# 从本地 fork 安装（唯一正确方式）
+cd /opt/data/home/tools/opencli
+npm install -g .
 
-# From source
-git clone git@github.com:jackwener/OpenCLI.git
-cd OpenCLI && npm install
-npx tsx src/main.ts <command>               # same surface, no global install
+# 验证
+opencli --version          # 1.7.6+
+opencli browser images --help  # 自定义命令存在 = 安装正确
 ```
 
-`opencli doctor` prints a structured `DoctorReport` — daemon status, extension connection, version checks. Scope is narrow: it diagnoses the **browser bridge** (daemon + extension + Chrome wiring). `PUBLIC` / `LOCAL` adapters, `opencli list`, `validate`, `verify`, plugin commands, and external-CLI passthrough don't need it to be green — only `COOKIE` / `HEADER` / `INTERCEPT` / `UI` adapters and the `opencli browser *` subcommands do. Flags: `--no-live` (skip live browser test), `--sessions` (list active automation sessions), `-v` (verbose).
+⚠️ 不要用 `npm install -g @jackwener/opencli`，官方包没有 CDP 补丁和自定义命令。
 
-## Prerequisites by command type
-
-| Strategy tag on `opencli list` | What it needs |
-|--------------------------------|---------------|
-| `PUBLIC` | Nothing — pure HTTP, no browser. |
-| `COOKIE` / `HEADER` | Chrome logged into the target site + **opencli Browser Bridge** extension loaded (see `extension/`). Command captures the credential from your live session — no re-login. |
-| `INTERCEPT` | Same as COOKIE, plus opencli opens an automation window to capture a signed request. |
-| `UI` | Same as COOKIE, full DOM interaction. |
-| `LOCAL` | No browser; talks to a local/dev endpoint. |
-
-Electron desktop apps (cursor, codex, chatwise, notion, discord-app, doubao-app, antigravity, chatgpt-app) route through CDP against the running app — same cookie-less flow as a logged-in browser. Make sure the app is running before invoking.
-
-## Discover what's installed — don't read this file, run a command
+## 环境变量（必须配置）
 
 ```bash
-opencli list                    # table, grouped by site
-opencli list -f json            # machine-readable; pipe to jq or your agent
-opencli list | grep -i twitter  # find commands for a specific site
-opencli <site> --help           # see that site's commands + flags
-opencli <site> <command> --help # see positional args and command-specific flags
+# CDP 浏览器端点（必须）
+export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9222"
+
+# 写入持久化（Hermes 用 dash shell）
+echo 'export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9222"' >> ~/.profile
+echo 'export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9222"' >> ~/.shrc
 ```
 
-Do not hard-code adapter lists — there are 100+ sites and the count moves every week. `opencli list -f json` is the source of truth; it emits one entry per command with `{site, name, aliases, description, strategy, browser, args, columns, ...}`. For an agent, that is always better than grepping a doc.
+完整环境变量表：
 
-## Universal flags (work on every adapter command)
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `OPENCLI_CDP_ENDPOINT` | **必填** | CDP 浏览器地址，如 `http://127.0.0.1:9222` |
+| `OPENCLI_BROWSER_CONNECT_TIMEOUT` | `30` | CDP 连接超时（秒） |
+| `OPENCLI_BROWSER_COMMAND_TIMEOUT` | `60` | 单命令超时（秒） |
+| `OPENCLI_BROWSER_EXPLORE_TIMEOUT` | `120` | 长时间侦察超时（秒） |
+| `OPENCLI_CACHE_DIR` | `~/.opencli/cache` | 网络缓存 + 浏览器状态缓存 |
+| `OPENCLI_WINDOW_FOCUSED` | `false` | 设为 `1` 则自动化窗口前台打开 |
+| `OPENCLI_VERBOSE` | `false` | 详细日志 |
+| `OPENCLI_DIAGNOSTIC` | `false` | 设为 `1` 输出 RepairContext JSON（供 autofix 用） |
 
-| flag | effect |
-|------|--------|
-| `-f, --format <fmt>` | `table` (default in TTY) · `yaml` (default in non-TTY) · `json` · `plain` · `md` · `csv`. Pass explicitly when you want a specific shape; agents almost always want `-f json`. |
-| `-v, --verbose` | Debug logs + stack traces on failure; also sets `OPENCLI_VERBOSE=1` for the process. |
+## 各 Strategy 对浏览器的需求
 
-Command-specific flags (`--limit`, `--tab`, `--filter`, …) are not universal — consult `<site> <command> --help`.
+| Strategy | 需要浏览器？ | 说明 |
+|----------|:-----------:|------|
+| `PUBLIC` | ❌ | 纯 HTTP，无需浏览器 |
+| `LOCAL` | ❌ | 本地/开发端点 |
+| `COOKIE` | ✅ | 需要 Chrome 已登录目标站点（CDP 共享 session） |
+| `HEADER` | ✅ | 同 COOKIE |
+| `INTERCEPT` | ✅ | 同 COOKIE + 自动化窗口捕获签名请求 |
+| `UI` | ✅ | 完整 DOM 交互 |
 
-## Output formats
+Electron 桌面应用（cursor, codex, chatwise, notion, discord-app, doubao-app, antigravity, chatgpt-app）通过 CDP 连接运行中的应用，无需 cookie。确保应用正在运行即可。
 
-- `json` — pretty-printed, 2-space indent. Default choice for agents.
-- `plain` — prints a single primary field for chat-style commands (`response`/`content`/`text`/`value`). Useful for piping to another tool.
-- `yaml` — fallback when output is not a TTY and `-f` is not explicit.
-- `table` — color-coded, site-grouped; meant for humans.
-- `md`, `csv` — straightforward tabular dumps.
+## 发现可用命令
 
-A few commands override the default via `cmd.defaultFormat` (e.g. chat commands default to `plain`), so don't assume without reading `--help`.
-
-## Environment variables
-
-| variable | default | purpose |
-|----------|---------|---------|
-| `OPENCLI_DAEMON_PORT` | `19825` | Daemon ↔ extension bridge port. |
-| `OPENCLI_BROWSER_CONNECT_TIMEOUT` | `30` | Seconds to wait for the browser bridge. |
-| `OPENCLI_BROWSER_COMMAND_TIMEOUT` | `60` | Per-command timeout. |
-| `OPENCLI_BROWSER_EXPLORE_TIMEOUT` | `120` | For long-running recon (plugin/adapter scaffolding). |
-| `OPENCLI_CDP_ENDPOINT` | — | Manual CDP endpoint override (dev / remote Chrome / Electron). |
-| `OPENCLI_CACHE_DIR` | `~/.opencli/cache` | Network capture + browser-state cache. |
-| `OPENCLI_WINDOW_FOCUSED` | `false` | `1` → automation window opens in the foreground. |
-| `OPENCLI_VERBOSE` | `false` | Verbose logging (also triggered by `-v`). |
-| `OPENCLI_DIAGNOSTIC` | `false` | `1` → emit structured `RepairContext` JSON on adapter failure. Required for `opencli-autofix`. |
-
-## Self-repair
-
-When an adapter command fails because the site changed (selectors drifted, API rotated, response schema shifted), the CLI emits a hint: `# AutoFix: re-run with OPENCLI_DIAGNOSTIC=1 ...`. Do that, read the `RepairContext`, patch the adapter at `RepairContext.adapter.sourcePath`, and retry. Max 3 repair rounds. The full flow is in `opencli-autofix`.
-
-## Writing your own adapter
-
-Two-path storage:
-
-- **Private**: `~/.opencli/clis/<site>/<command>.js` — no build step, hot-available, not visible in the public package.
-- **Public / PR**: `clis/<site>/<command>.js` — for upstream contribution; requires build.
-
-Scaffolding & verification:
+不要硬编码适配器列表——每周都在变。用命令查：
 
 ```bash
-opencli browser init <site>/<command>   # generates a skeleton
-opencli validate [target]               # semantic checks on the loaded registry (description, domain, pipeline step names, func|pipeline|_lazy presence, arg duplicates) — no network, no browser
-opencli verify [target] [--smoke]       # run the command with synthetic args
-opencli browser verify <site>/<command> # end-to-end smoke inside the bridge
+opencli list                # 按站点分组的表格
+opencli list -f json        # 机器可读，适合 agent
+opencli list | grep twitter # 找特定站点的命令
+opencli <site> --help       # 查看某站点所有子命令
+opencli <site> <cmd> --help # 查看具体参数
 ```
 
-Adapters import only `@jackwener/opencli/registry` and `@jackwener/opencli/errors`. `columns` must align 1:1 (in name and order) with keys of the object returned by `func`. For the full workflow see `opencli-adapter-author`.
+`opencli list -f json` 是唯一权威来源，每条包含 `{site, name, description, strategy, browser, args, columns}`。
 
-## Plugins
+## 通用参数（所有适配器命令都支持）
 
-Plugins are third-party extensions pulled from git, separate from the main adapter registry:
+| 参数 | 效果 |
+|------|------|
+| `-f, --format <fmt>` | `table`（TTY 默认）· `yaml`（非 TTY 默认）· `json` · `plain` · `md` · `csv`。Agent 几乎总是用 `-f json` |
+| `-v, --verbose` | 调试日志 + 错误堆栈 |
+
+各命令自有参数（`--limit`, `--tab`, `--filter` 等）需查阅 `--help`。
+
+## 输出格式
+
+| 格式 | 适用场景 |
+|------|---------|
+| `json` | Agent 首选，2 缩进 pretty-print |
+| `plain` | 单字段输出（response/content/text/value），适合管道 |
+| `yaml` | 非 TTY 且未指定 `-f` 时的 fallback |
+| `table` | 彩色表格，给人看的 |
+| `md` / `csv` | 表格导出 |
+
+部分命令通过 `cmd.defaultFormat` 覆盖默认值（如 chat 命令默认 `plain`），不要假设，看 `--help`。
+
+## 自适应修复（AutoFix）
+
+当适配器因网站改版失败时，CLI 会提示：`# AutoFix: re-run with OPENCLI_DIAGNOSTIC=1 ...`。按提示执行，读取 `RepairContext`，修补适配器源文件后重试。最多 3 轮。完整流程见 `opencli-autofix`。
+
+## 编写自定义适配器
+
+两种存储路径：
+
+- **私有**：`~/.opencli/clis/<site>/<command>.js` — 免 build，即写即用
+- **公开/PR**：`clis/<site>/<command>.js` — 需贡献上游，要 build
+
+脚手架与验证：
 
 ```bash
-opencli plugin install github:user/repo    # install
-opencli plugin list [-f json]              # see installed
-opencli plugin update [name] | --all       # keep current
+opencli browser init <site>/<command>   # 生成骨架
+opencli validate [target]               # 语义检查（无网络、无浏览器）
+opencli verify [target] [--smoke]       # 合成参数试跑
+opencli browser verify <site>/<command> # CDP 端到端验证
+```
+
+适配器只引入 `@jackwener/opencli/registry` 和 `@jackwener/opencli/errors`。`columns` 必须与 `func` 返回对象的 keys 一一对应（含顺序）。完整流程见 `opencli-adapter-author`。
+
+## 插件
+
+```bash
+opencli plugin install github:user/repo    # 安装
+opencli plugin list [-f json]              # 查看
+opencli plugin update [name] | --all       # 更新
 opencli plugin uninstall <name>
-opencli plugin create <name>               # scaffold a new plugin
+opencli plugin create <name>               # 创建骨架
 ```
 
-## External CLI passthrough
-
-Wraps external command-line tools so you can discover + invoke them through the same `opencli …` entrypoint:
+## 外部 CLI 透传
 
 ```bash
-opencli install gh             # auto-install via brew/apt/npm per external-clis.yaml
+opencli install gh             # 按 external-clis.yaml 自动安装
 opencli register my-tool \
     --binary my-tool \
     --install "npm i -g my-tool" \
     --desc "My internal CLI"
-opencli gh pr list --limit 5   # passthrough; stdio is inherited, exit code propagated
-opencli docker ps
+opencli gh pr list --limit 5   # 透传，stdin/stdout/exit code 直接传递
 ```
 
-Built-in entries live in `src/external-clis.yaml`; user overrides and additions in `~/.opencli/external-clis.yaml`. Commonly shipped: `gh`, `docker`, `vercel`, `lark-cli`, `dws`, `wecom-cli`, `obsidian`.
+内置条目在 `src/external-clis.yaml`，用户自定义在 `~/.opencli/external-clis.yaml`。常见内置：`gh`, `docker`, `vercel`, `lark-cli`, `dws`, `wecom-cli`, `obsidian`。
 
-## Shell completion
+## Shell 补全
 
 ```bash
-opencli completion bash   # also: zsh, fish
-# -> script on stdout; source or save per your shell's convention
+opencli completion bash   # 也支持 zsh, fish
 ```
 
-## Where to go next
+## 下一步
 
-| If you're about to… | Load this skill |
-|---------------------|-----------------|
-| Drive a live browser ad-hoc (no adapter available, or prototyping) | `opencli-browser` |
-| Write a new adapter, or add a command to an existing site | `opencli-adapter-author` |
-| Fix a broken adapter after a command failure | `opencli-autofix` |
-| Route a search / lookup / research request to the right adapter | `smart-search` |
+| 你要做的事 | 加载 skill |
+|-----------|-----------|
+| 即时驱动浏览器（无适配器或原型验证） | `opencli-browser` |
+| 写新适配器或给已有站点加命令 | `opencli-adapter-author` |
+| 修复损坏的适配器 | `opencli-autofix` |
+| 搜索/查询/研究路由 | `smart-search` |
 
-## Commands that used to exist
+## 已废弃的命令
 
-The following were removed in the PR #1094 consolidation — don't try to invoke them:
+以下在 PR #1094 合并中移除，不要使用：
 
-- `opencli explore <url>` — superseded by `opencli browser network` + `opencli browser find` for live API discovery, and by the `opencli-adapter-author` workflow for capture.
-- `opencli record <url>` — removed; manual capture now lives in `opencli browser network --detail`.
-- `opencli web read` / `opencli desktop *` as top-level groups — folded into their respective adapters (`opencli web read` still exists as the `web` adapter's `read` command, but there is no standalone `web` / `desktop` top-level group command).
+- `opencli explore <url>` — 已被 `opencli browser network` + `opencli browser find` 和 `opencli-adapter-author` 工作流替代
+- `opencli record <url>` — 已移除；手动抓包用 `opencli browser network --detail`
+- `opencli web read` / `opencli desktop *` 作为顶级分组 — 已折叠到各自适配器中
 
-## Don't
+## 注意事项
 
-- Don't paste this skill's command list into your plan; it will rot. Call `opencli list -f json` at the start of a task instead.
-- Don't assume every adapter needs a browser — strategy `PUBLIC` and `LOCAL` don't. Check the `strategy` field.
-- Don't silently fall back from a failing adapter to a hand-rolled `fetch` — `OPENCLI_DIAGNOSTIC=1` almost always tells you exactly what to change in the adapter. Do that first.
+- 不要把命令列表粘贴到计划里——会过时。每次任务开始时跑 `opencli list -f json`。
+- 不要假设所有适配器都需要浏览器——`PUBLIC` 和 `LOCAL` 不需要，先查 `strategy` 字段。
+- 适配器失败时不要静默回退到手写 `fetch`——先用 `OPENCLI_DIAGNOSTIC=1` 诊断，几乎总能告诉你该改什么。

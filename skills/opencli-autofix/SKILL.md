@@ -1,63 +1,67 @@
 ---
+
 name: opencli-autofix
-description: Automatically fix broken OpenCLI adapters when commands fail. Load this skill when an opencli command fails — it guides you through diagnosing the failure via OPENCLI_DIAGNOSTIC, patching the adapter, retrying, and filing an upstream GitHub issue after a verified fix. Works with any AI agent.
+description: OpenCLI 适配器自动修复——当命令失败时自动诊断、修补适配器、重试。加载条件：opencli 命令执行失败且错误可修复。CDP 直连模式。
 allowed-tools: Bash(opencli:*), Bash(gh:*), Read, Edit, Write
 ---
 
-# OpenCLI AutoFix — Automatic Adapter Self-Repair
+# OpenCLI AutoFix（CDP 模式）
 
-When an `opencli` command fails because a website changed its DOM, API, or response schema, **automatically diagnose, fix the adapter, and retry** — don't just report the error.
+当 `opencli` 命令因网站改版（DOM 变化、API 变更、响应 schema 偏移）而失败时，**自动诊断→修复适配器→重试**——不要只报错。
 
-## Safety Boundaries
+## 安全边界
 
-**Before starting any repair, check these hard stops:**
+**开始修复前，先检查硬停止条件：**
 
-- **`AUTH_REQUIRED`** (exit code 77) — **STOP.** Do not modify code. Tell the user to log into the site in Chrome.
-- **`BROWSER_CONNECT`** (exit code 69) — **STOP.** Do not modify code. Tell the user to run `opencli doctor`.
-- **CAPTCHA / rate limiting** — **STOP.** Not an adapter issue.
+- **`AUTH_REQUIRED`**（exit code 77）——**停止。** 不改代码。告诉用户在 Chrome 中登录目标站点。
+- **`BROWSER_CONNECT`**（exit code 69）——**停止。** 不改代码。检查 `OPENCLI_CDP_ENDPOINT` 是否设置正确，浏览器是否运行：`curl -s http://127.0.0.1:9222/json/version`
+- **CAPTCHA / 频率限制** ——**停止。** 不是适配器问题。
 
-**Scope constraint:**
-- **Only modify the file at `RepairContext.adapter.sourcePath`** — this is the authoritative adapter location (may be `clis/<site>/` in repo or `~/.opencli/clis/<site>/` for npm installs)
-- **Never modify** `src/`, `extension/`, `tests/`, `package.json`, or `tsconfig.json`
+**范围约束：**
+- **只修改 `RepairContext.adapter.sourcePath` 指向的文件**——权威位置可能在 repo (`clis/`) 或本地 (`~/.opencli/clis/`)
+- **绝不修改** `src/`, `extension/`, `tests/`, `package.json`, `tsconfig.json`
 
-**Retry budget:** Max **3 repair rounds** per failure. If 3 rounds of diagnose → fix → retry don't resolve it, stop and report what was tried.
+**重试预算：每次失败最多 3 轮修复。** 3 轮诊断→修复→重试仍未解决则停止并报告。
 
-## Prerequisites
+## 前置确认
 
 ```bash
-opencli doctor    # Verify extension + daemon connectivity
+# 确认 CDP 连通（不需要 doctor）
+curl -s http://127.0.0.1:9222/json/version | head -3
+export OPENCLI_CDP_ENDPOINT="http://127.0.0.1:9222"
 ```
 
-## When to Use This Skill
+## 触发条件
 
-Use when `opencli <site> <command>` fails with repairable errors:
-- **SELECTOR** — element not found (DOM changed)
-- **EMPTY_RESULT** — no data returned (API response changed)
-- **API_ERROR** / **NETWORK** — endpoint moved or broke
-- **PAGE_CHANGED** — page structure no longer matches
-- **COMMAND_EXEC** — runtime error in adapter logic
-- **TIMEOUT** — page loads differently, adapter waits for wrong thing
+以下错误类型适用此 skill：
 
-## Before Entering Repair: "Empty" ≠ "Broken"
+| 错误码 | 含义 |
+|--------|------|
+| `SELECTOR` | DOM 元素找不到（网站改版） |
+| `EMPTY_RESULT` | 无数据返回（API 响应变化） |
+| `API_ERROR` / `NETWORK` | 端点移动或损坏 |
+| `PAGE_CHANGED` | 页面结构不再匹配 |
+| `COMMAND_EXEC` | 适配器逻辑运行时错误 |
+| `TIMEOUT` | 页面加载不同，适配器等错了东西 |
 
-`EMPTY_RESULT` — and sometimes a structurally-valid `SELECTOR` that returns nothing — is often **not an adapter bug**. Platforms actively degrade results under anti-scrape heuristics, and a "not found" response from the site doesn't mean the content is actually missing. Rule this out **before** committing to a repair round:
+## 修复前："空结果" ≠ "坏了"
 
-- **Retry with an alternative query or entry point.** If `opencli xiaohongshu search "X"` returns 0 but `opencli xiaohongshu search "X 攻略"` returns 20, the adapter is fine — the platform was shaping results for the first query.
-- **Spot-check in a normal Chrome tab.** If the data is visible in the user's own browser but the adapter comes back empty, the issue is usually authentication state, rate limiting, or a soft block — not a code bug. The fix is `opencli doctor` / re-login, not editing source.
-- **Look for soft 404s.** Sites like xiaohongshu / weibo / douyin return HTTP 200 with an empty payload instead of a real 404 when an item is hidden or deleted. The snapshot will look structurally correct. A retry 2-3 seconds later often distinguishes "temporarily hidden" from "actually gone".
-- **"0 results" from a search is an answer.** If the adapter successfully reached the search endpoint, got an HTTP 200, and the platform returned `results: []`, that is a valid answer — report it to the user as "no matches for this query" rather than patching the adapter.
+`EMPTY_RESULT`——以及有时结构上有效的 `SELECTOR` 返回空——往往**不是适配器 bug**。平台在反爬策略下主动降级返回结果，"not found" 的响应不代表内容真的缺失。在进入修复流程前先排除：
 
-Only proceed to Step 1 if the empty/selector-missing result is **reproducible across retries and alternative entry points**. Otherwise you're patching a working adapter to chase noise, and the patched version will break the next working path.
+- **用不同查询或入口重试。** 如果 `opencli xiaohongshu search "X"` 返回 0 但 `opencli xiaohongshu search "X 攻略"` 返回 20 条，适配器没问题——平台在塑形第一个查询的结果。
+- **在正常 Chrome 标签页中目视检查。** 数据在用户自己浏览器中可见但适配器返回空，问题通常是认证状态、频率限制或软拦截——不是代码 bug。修复方式是检查 CDP 登录态，不是编辑源码。
+- **注意 soft 404。** 小红书/微博/抖音等站点对已隐藏或删除内容返回 HTTP 200 + 空 payload 而非真正 404。快照看起来结构完全正常。过几秒重试一次常能区分"暂时隐藏"和"确实没了"。
+- **"0 条搜索结果"是一个有效答案。** 如果适配器成功到达搜索端点、拿到 HTTP 200、平台返回 `results: []`，这是合法答案——向用户报告"无匹配结果"而不是去修补适配器。
 
-## Step 1: Collect Diagnostic Context
+**只有**空结果/选择器缺失**跨重试和替代入口均可复现**时才进入 Step 1。否则你是在修补一个工作正常的适配器来追逐噪声，补丁版的下一个正常路径反而会断。
 
-Run the failing command with diagnostic mode enabled:
+## Step 1: 收集诊断上下文
 
 ```bash
 OPENCLI_DIAGNOSTIC=1 opencli <site> <command> [args...] 2>diagnostic.json
 ```
 
-This outputs a `RepairContext` JSON between `___OPENCLI_DIAGNOSTIC___` markers in stderr:
+输出 `RepairContext` JSON 到 stderr（标记在 `___OPENCLI_DIAGNOSTIC___` 之间）：
 
 ```json
 {
@@ -70,142 +74,131 @@ This outputs a `RepairContext` JSON between `___OPENCLI_DIAGNOSTIC___` markers i
     "site": "example",
     "command": "example/search",
     "sourcePath": "/path/to/clis/example/search.js",
-    "source": "// full adapter source code"
+    "source": "// 完整适配器源码"
   },
   "page": {
     "url": "https://example.com/search",
-    "snapshot": "// DOM snapshot with [N] indices",
+    "snapshot": "// DOM 快照含 [N] 索引",
     "networkRequests": [],
     "consoleErrors": []
   },
-  "timestamp": "2025-01-01T00:00:00.000Z"
+  "timestamp": "2026-04-22T00:00:00.000Z"
 }
 ```
 
-**Parse it:**
-```bash
-# Extract JSON between markers from stderr output
-cat diagnostic.json | sed -n '/___OPENCLI_DIAGNOSTIC___/{n;p;}'
-```
+## Step 2: 分析失败原因
 
-## Step 2: Analyze the Failure
+读诊断上下文和适配器源码，归类根因：
 
-Read the diagnostic context and the adapter source. Classify the root cause:
+| 错误码 | 可能原因 | 修复策略 |
+|--------|---------|---------|
+| `SELECTOR` | DOM 重构，class/id 改名 | 探索当前 DOM → 找新选择器 |
+| `EMPTY_RESULT` | API 响应 schema 变化或数据移位 | 检查网络 → 找新响应路径 |
+| `API_ERROR` | 端点 URL 变化，需要新参数 | 通过网络拦截发现新 API |
+| `AUTH_REQUIRED` | 登录流变化，cookie 过期 | **停止**——让用户登录，不改代码 |
+| `TIMEOUT` | 页面加载不同，spinner/懒加载 | 更新/添加等待条件 |
+| `PAGE_CHANGED` | 大改版 | 可能需要完整适配器重写 |
 
-| Error Code | Likely Cause | Repair Strategy |
-|-----------|-------------|-----------------|
-| SELECTOR | DOM restructured, class/id renamed | Explore current DOM → find new selector |
-| EMPTY_RESULT | API response schema changed, or data moved | Check network → find new response path |
-| API_ERROR | Endpoint URL changed, new params required | Discover new API via network intercept |
-| AUTH_REQUIRED | Login flow changed, cookies expired | **STOP** — tell user to log in, do not modify code |
-| TIMEOUT | Page loads differently, spinner/lazy-load | Add/update wait conditions |
-| PAGE_CHANGED | Major redesign | May need full adapter rewrite |
+**关键问题：**
+1. 适配器要做什么？（读 `source` 字段）
+2. 失败时页面什么样？（读 `snapshot` 字段）
+3. 发生了哪些网络请求？（读 `networkRequests`）
+4. 适配器期望的和页面实际提供的之间差距在哪？
 
-**Key questions to answer:**
-1. What is the adapter trying to do? (Read the `source` field)
-2. What did the page look like when it failed? (Read the `snapshot` field)
-3. What network requests happened? (Read `networkRequests`)
-4. What's the gap between what the adapter expects and what the page provides?
+## Step 3: 用 CDP 浏览器探索当前网站
 
-## Step 3: Explore the Current Website
+**不要用坏掉的适配器**——它只会再失败一次。
 
-Use `opencli browser` to inspect the live website. **Never use the broken adapter** — it will just fail again.
-
-### DOM changed (SELECTOR errors)
+### DOM 变化（SELECTOR 错误）
 
 ```bash
-# Open the page and inspect current DOM
+# 打开页面并检查当前 DOM
 opencli browser open https://example.com/target-page && opencli browser state
 
-# Look for elements that match the adapter's intent
-# Compare the snapshot with what the adapter expects
+# 找与适配器意图匹配的元素
+# 对比快照和适配器的期望
 ```
 
-### API changed (API_ERROR, EMPTY_RESULT)
+### API 变化（API_ERROR, EMPTY_RESULT）
 
 ```bash
-# Open page with network interceptor, then trigger the action manually
+# 打开页面并观察网络
 opencli browser open https://example.com/target-page && opencli browser state
 
-# Interact to trigger API calls
+# 交互触发 API 调用
 opencli browser click <N> && opencli browser network
 
-# Narrow to the request you care about by the fields its body should have
+# 缩小到你关心的请求
 opencli browser network --filter author,text,likes
 
-# Inspect specific API response (key is the `key` field from the default JSON output)
+# 查看特定 API 响应（key 是默认 JSON 输出中的 key 字段）
 opencli browser network --detail <key>
 ```
 
-## Step 4: Patch the Adapter
+## Step 4: 修补适配器
 
-Read the adapter source file at the path from `RepairContext.adapter.sourcePath` and make targeted fixes. This path is authoritative — it may be in the repo (`clis/`) or user-local (`~/.opencli/clis/`).
+读取 `RepairContext.adapter.sourcePath` 指向的源文件，做针对性修改。
+
+### 常见修复
+
+**选择器更新：**
+```javascript
+// 改前: page.evaluate('document.querySelector(".old-class")...')
+// 改后:  page.evaluate('document.querySelector(".new-class")...')
+```
+
+**API 端点变更：**
+```javascript
+// 改前: const resp = await page.evaluate(`fetch('/api/v1/old-endpoint')...`)
+// 改后:  const resp = await page.evaluate(`fetch('/api/v2/new-endpoint')...`)
+```
+
+**响应 schema 变化：**
+```javascript
+// 改前: const items = data.results
+// 改后:  const items = data.data.items  // API 现在嵌套在 "data" 下
+```
+
+**等待条件更新：**
+```javascript
+// 改前: await page.wait({ selector: '.loading-spinner', hidden: true })
+// 改后:  await page.wait({ selector: '[data-loaded="true"]' })
+```
+
+### 修补规则
+
+1. **最小改动**——只修坏的，不重构
+2. **保持相同输出结构**——`columns` 和返回格式必须兼容
+3. **优先 API 胜过 DOM 抓取**——如果在探索中发现 JSON API，切换到它
+4. **只用 `@jackwener/opencli/*` 引入**——不加第三方包导入
+5. **修补后立即测试**
+6. **不要放松 verify fixture 来掩盖失败。** `patterns` / `notEmpty` / `mustNotContain` / `mustBeTruthy` 规则失败意味着适配器输出确实有问题。收紧适配器让它产出正确值；不要放宽 fixture 来接受错误值。唯一合理的 fixture 编辑场景是**站点本身**变了形状（如 URL 格式迁移）——此时更新 fixture 并在 `~/.opencli/sites/<site>/notes.md` 中记录。
+
+## Step 5: 验证修复
 
 ```bash
-# Read the adapter (use the exact path from diagnostic)
-cat <RepairContext.adapter.sourcePath>
-```
-
-### Common Fixes
-
-**Selector update:**
-```typescript
-// Before: page.evaluate('document.querySelector(".old-class")...')
-// After:  page.evaluate('document.querySelector(".new-class")...')
-```
-
-**API endpoint change:**
-```typescript
-// Before: const resp = await page.evaluate(`fetch('/api/v1/old-endpoint')...`)
-// After:  const resp = await page.evaluate(`fetch('/api/v2/new-endpoint')...`)
-```
-
-**Response schema change:**
-```typescript
-// Before: const items = data.results
-// After:  const items = data.data.items  // API now nests under "data"
-```
-
-**Wait condition update:**
-```typescript
-// Before: await page.wait({ selector: '.loading-spinner', hidden: true })
-// After:  await page.wait({ selector: '[data-loaded="true"]' })
-```
-
-### Rules for Patching
-
-1. **Make minimal changes** — fix only what's broken, don't refactor
-2. **Keep the same output structure** — `columns` and return format must stay compatible
-3. **Prefer API over DOM scraping** — if you discover a JSON API during exploration, switch to it
-4. **Use `@jackwener/opencli/*` imports only** — never add third-party package imports
-5. **Test after patching** — run the command again to verify
-6. **Never relax `verify/<cmd>.json` fixtures to silence a failure.** A failing `patterns` / `notEmpty` / `mustNotContain` / `mustBeTruthy` rule means the adapter's output is broken. Tighten the adapter so it produces correct values; do not loosen the fixture to accept the broken values. The one legitimate reason to edit a fixture during repair is when the **site itself** changed shape (e.g. URL format migration) — in that case update the fixture and note the change in `~/.opencli/sites/<site>/notes.md`. Otherwise editing the fixture is covering up a silent correctness regression.
-
-## Step 5: Verify the Fix
-
-```bash
-# Run the command normally (without diagnostic mode)
+# 正常运行（不带 diagnostic 模式）
 opencli <site> <command> [args...]
 ```
 
-If it still fails, go back to Step 1 and collect fresh diagnostics. You have a budget of **3 repair rounds** (diagnose → fix → retry). If the same error persists after a fix, try a different approach. After 3 rounds, stop and report what was tried.
+仍失败则回到 Step 1 收集新鲜诊断。你有 **3 轮修复预算**（诊断→修复→重试）。同一错误持续则换不同方法尝试。3 轮后停止报告。
 
-## Step 6: File an Upstream Issue
+## Step 6: 提交上游 Issue
 
-If the retry **passes**, the local adapter has drifted from upstream. File a GitHub issue so the fix flows back to `jackwener/OpenCLI`.
+如果重试**通过**，本地适配器和上游已有偏差。提交 GitHub issue 让修复回流到 `jackwener/OpenCLI`。
 
-**Do NOT file for:**
-- `AUTH_REQUIRED`, `BROWSER_CONNECT`, `ARGUMENT`, `CONFIG` — environment/usage issues, not adapter bugs
-- CAPTCHA or rate limiting — not fixable upstream
-- Failures you couldn't actually fix (3 rounds exhausted)
+**不要为以下情况提 issue：**
+- `AUTH_REQUIRED`, `BROWSER_CONNECT`, `ARGUMENT`, `CONFIG` ——环境/使用问题，不是适配器 bug
+- CAPTCHA 或频率限制 ——上游无法修复
+- 你实际没修好的失败（3 轮耗尽）
 
-**Only file after a verified local fix** — the retry must pass first.
+**只在验证通过的本地修复后提 issue。**
 
-**Procedure:**
+**流程：**
 
-1. Prepare the issue content from the RepairContext you already have:
-   - **Title:** `[autofix] <site>/<command>: <error_code>` (e.g. `[autofix] zhihu/hot: SELECTOR`)
-   - **Body** (use this template):
+1. 从 RepairContext 准备 issue 内容：
+   - **标题：** `[autofix] <site>/<command>: <error_code>`
+   - **正文模板：**
 
 ```markdown
 ## Summary
@@ -214,7 +207,7 @@ OpenCLI autofix repaired this adapter locally, and the retry passed.
 ## Adapter
 - Site: `<site>`
 - Command: `<command>`
-- OpenCLI version: `<version from opencli --version>`
+- OpenCLI version: `<opencli --version 输出>`
 
 ## Original failure
 - Error code: `<error_code>`
@@ -226,58 +219,57 @@ OpenCLI autofix repaired this adapter locally, and the retry passed.
 ## Local fix summary
 
 ~~~
-<1-2 sentence description of what you changed and why>
+<1-2 句话描述改了什么为什么改>
 ~~~
 
 _Issue filed by OpenCLI autofix after a verified local repair._
 ```
 
-2. **Ask the user before filing.** Show them the draft title and body. Only proceed if they confirm.
-
-3. If the user approves and `gh auth status` succeeds:
+2. **先给用户看草稿。** 展示标题和正文，用户确认后才操作。
+3. 用户批准且 `gh auth status` 通过：
 
 ```bash
 gh issue create --repo jackwener/OpenCLI \
   --title "[autofix] <site>/<command>: <error_code>" \
-  --body "<the body above>"
+  --body "<上面的正文>"
 ```
 
-If `gh` is not installed or not authenticated, tell the user and skip — do not error out.
+`gh` 未安装或未认证则告知用户并跳过——不要因此报错。
 
-## When to Stop
+## 停止条件
 
-**Hard stops (do not modify code):**
-- **AUTH_REQUIRED / BROWSER_CONNECT** — environment issue, not adapter bug
-- **Site requires CAPTCHA** — can't automate this
-- **Rate limited / IP blocked** — not an adapter issue
+**硬停止（不修改代码）：**
+- `AUTH_REQUIRED / BROWSER_CONNECT` ——环境问题，不是适配器 bug
+- 站点要求 CAPTCHA ——无法自动化
+- 被 IP 封禁/频率限制 ——不是适配器问题
 
-**Soft stops (report after attempting):**
-- **3 repair rounds exhausted** — stop, report what was tried and what failed
-- **Feature completely removed** — the data no longer exists
-- **Major redesign** — needs full adapter rewrite via `opencli-adapter-author` skill
+**软停止（尝试后报告）：**
+- 3 轮修复耗尽 ——报告尝试了什么和什么失败了
+- 功能完全移除 ——数据不再存在
+- 大改版 ——需要通过 `opencli-adapter-author` skill 完整重写
 
-In all stop cases, clearly communicate the situation to the user rather than making futile patches.
+所有停止情况下明确向用户沟通状况，不要做无效修补。
 
-## Example Repair Session
+## 示例修复过程
 
 ```
-1. User runs: opencli zhihu hot
-   → Fails: SELECTOR "Could not find element: .HotList-item"
+1. 用户运行: opencli zhihu hot
+   → 失败: SELECTOR "Could not find element: .HotList-item"
 
-2. AI runs: OPENCLI_DIAGNOSTIC=1 opencli zhihu hot 2>diag.json
-   → Gets RepairContext with DOM snapshot showing page loaded
+2. AI 运行: OPENCLI_DIAGNOSTIC=1 opencli zhihu hot 2>diag.json
+   → 获得 RepairContext，DOM 快照显示页面已加载
 
-3. AI reads diagnostic: snapshot shows the page loaded but uses ".HotItem" instead of ".HotList-item"
+3. AI 读诊断: 快照显示页面用了 ".HotItem" 而非 ".HotList-item"
 
-4. AI explores: opencli browser open https://www.zhihu.com/hot && opencli browser state
-   → Confirms new class name ".HotItem" with child ".HotItem-content"
+4. AI 探索: opencli browser open https://www.zhihu.com/hot && opencli browser state
+   → 确认新 class 名 ".HotItem"，子元素 ".HotItem-content"
 
-5. AI patches: Edit adapter at RepairContext.adapter.sourcePath — replace ".HotList-item" with ".HotItem"
+5. AI 修补: 编辑 RepairContext.adapter.sourcePath ——替换 ".HotList-item" 为 ".HotItem"
 
-6. AI verifies: opencli zhihu hot
-   → Success: returns hot topics
+6. AI 验证: opencli zhihu hot
+   → 成功: 返回热搜话题
 
-7. AI prepares upstream issue draft, shows it to the user
+7. AI 准备 upstream issue 草稿，展示给用户
 
-8. User approves → AI runs: gh issue create --repo jackwener/OpenCLI --title "[autofix] zhihu/hot: SELECTOR" --body "..."
+8. 用户批准 → AI 运行: gh issue create --repo jackwener/OpenCLI --title "[autofix] zhihu/hot: SELECTOR" --body "..."
 ```
