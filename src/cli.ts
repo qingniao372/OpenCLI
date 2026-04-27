@@ -712,13 +712,15 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
     }));
 
   addBrowserTabOption(browser.command('screenshot').argument('[path]', 'Save to file (base64 if omitted)'))
+    .option('--full', 'Capture the full scrollable page (not just viewport)')
     .description('Take screenshot')
-    .action(browserAction(async (page, path) => {
+    .action(browserAction(async (page, path, opts) => {
+      const fullPage = !!opts?.full;
       if (path) {
-        await page.screenshot({ path });
-        console.log(`Screenshot saved to: ${path}`);
+        await page.screenshot({ path, fullPage });
+        console.log(`Screenshot saved to: ${path}${fullPage ? ' (full page)' : ''}`);
       } else {
-        console.log(await page.screenshot({ format: 'png' }));
+        console.log(await page.screenshot({ format: 'png', fullPage }));
       }
     }));
 
@@ -746,6 +748,7 @@ export function createProgram(BUILTIN_CLIS: string, USER_CLIS: string): Command 
           console.log(`[${img.index}] ${img.src} | ${img.alt}`);
         }
       }
+    }));
 
 
   // ── Analyze (site recon, agent-native) ──
