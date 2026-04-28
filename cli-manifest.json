@@ -3532,7 +3532,7 @@
       {
         "name": "op",
         "type": "str",
-        "default": "/opt/data/home/Pictures/chatgpt",
+        "default": "~/Pictures/chatgpt",
         "required": false,
         "help": "Output directory"
       },
@@ -7120,7 +7120,7 @@
       {
         "name": "op",
         "type": "str",
-        "default": "/opt/data/home/tmp/gemini-images",
+        "default": "~/tmp/gemini-images",
         "required": false,
         "help": "Output directory shorthand"
       },
@@ -8440,7 +8440,7 @@
       {
         "name": "path",
         "type": "str",
-        "default": "/opt/data/home/Downloads/Instagram",
+        "default": "~/Downloads/Instagram",
         "required": false,
         "help": "Download directory"
       }
@@ -16683,6 +16683,54 @@
     "type": "js",
     "modulePath": "twitter/unfollow.js",
     "sourceFile": "twitter/unfollow.js",
+    "navigateBefore": true
+  },
+  {
+    "site": "ubersuggest",
+    "name": "login",
+    "description": "Check Ubersuggest login status and auto sign-in via Google OAuth if needed",
+    "strategy": "ui",
+    "browser": true,
+    "args": [],
+    "columns": [
+      "metric",
+      "value"
+    ],
+    "type": "js",
+    "modulePath": "ubersuggest/login.js",
+    "sourceFile": "ubersuggest/login.js",
+    "navigateBefore": true
+  },
+  {
+    "site": "ubersuggest",
+    "name": "search",
+    "description": "Search Ubersuggest for keyword data: volume, difficulty, backlinks, ideas & competitors",
+    "strategy": "ui",
+    "browser": true,
+    "args": [
+      {
+        "name": "query",
+        "type": "str",
+        "required": true,
+        "positional": true,
+        "help": "Keyword to search"
+      },
+      {
+        "name": "loc",
+        "type": "str",
+        "default": "US",
+        "required": false,
+        "help": "Location code (US/GB/CA/AU or numeric)"
+      }
+    ],
+    "columns": [
+      "metric",
+      "value",
+      "details"
+    ],
+    "type": "js",
+    "modulePath": "ubersuggest/search.js",
+    "sourceFile": "ubersuggest/search.js",
     "navigateBefore": true
   },
   {
