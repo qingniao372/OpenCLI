@@ -16688,7 +16688,7 @@
   {
     "site": "ubersuggest",
     "name": "login",
-    "description": "Check Ubersuggest login status and auto sign-in via Google OAuth if needed",
+    "description": "Check Ubersuggest login status and auto sign-in via Google OAuth",
     "strategy": "ui",
     "browser": true,
     "args": [],

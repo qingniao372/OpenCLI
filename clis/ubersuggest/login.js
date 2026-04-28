@@ -1,23 +1,81 @@
 /**
  * Ubersuggest Login — auto-detect and restore Google OAuth session.
  * 
- * Checks if Ubersuggest session is active. If expired, clicks "Sign in with Google"
- * to re-authenticate (browser must have active Google session).
+ * Handles 3 states:
+ *   1. Already logged in → report status
+ *   2. Logged out (overview page, "Sign in" link) → click Sign in → then click Continue with Google
+ *   3. On /login page → click Continue with Google directly
  * 
  * Usage: opencli ubersuggest login
  */
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { CliError } from '@jackwener/opencli/errors';
 
-/** Run a simple expression in browser context */
 async function evalExpr(page, expr) {
     return page.evaluate(expr);
+}
+
+/** Wait for any recognizable page state */
+async function waitForPage(page, maxWait) {
+    var waited = 0;
+    while (waited < maxWait) {
+        await new Promise(function(r) { setTimeout(r, 2000); });
+        waited += 2;
+        
+        var state = await evalExpr(page, `(function(){
+            var t = document.body.innerText || '';
+            var hasNav = !!document.querySelector('button[data-testid="nav-avatar-button"]');
+            var hasSignIn = t.indexOf('Sign in') > -1 && !hasNav;
+            var hasGoogleLink = !!Array.from(document.querySelectorAll('a')).find(function(a){
+                var txt = (a.innerText||'').toLowerCase();
+                return txt.indexOf('google') > -1 && txt.indexOf('continue') > -1;
+            });
+            var isLogin = window.location.pathname.indexOf('/login') > -1;
+            
+            return JSON.stringify({
+                url: window.location.href,
+                bodyLen: t.length,
+                isLogin: isLogin,
+                hasNav: hasNav,
+                hasSignIn: hasSignIn,
+                hasGoogleLink: hasGoogleLink
+            });
+        })()`);
+        
+        state = JSON.parse(state);
+        
+        // Any of these means we can proceed
+        if (state.hasNav || state.hasSignIn || state.hasGoogleLink || state.isLogin) {
+            return { ready: true, state: state, waited: waited };
+        }
+    }
+    
+    var finalState = await evalExpr(page, `(function(){
+        return JSON.stringify({url: window.location.href, bodyLen: document.body.innerText.length});
+    })()`);
+    return { ready: false, state: JSON.parse(finalState), waited: waited };
+}
+
+/** Click a link by text content */
+async function clickLink(page, text) {
+    return evalExpr(page, `(function(){
+        var link = Array.from(document.querySelectorAll('a, button')).find(function(el){
+            return (el.innerText||'').trim().toLowerCase() === '${text.toLowerCase()}';
+        });
+        if (link) { link.click(); return 'clicked'; }
+        // Fallback: contains match
+        var fallback = Array.from(document.querySelectorAll('a, button')).find(function(el){
+            return (el.innerText||'').toLowerCase().indexOf('${text.toLowerCase()}') > -1;
+        });
+        if (fallback) { fallback.click(); return 'clicked-fallback'; }
+        return 'not-found';
+    })()`);
 }
 
 cli({
     site: 'ubersuggest',
     name: 'login',
-    description: 'Check Ubersuggest login status and auto sign-in via Google OAuth if needed',
+    description: 'Check Ubersuggest login status and auto sign-in via Google OAuth',
     strategy: Strategy.UI,
     browser: true,
     args: [],
@@ -25,130 +83,129 @@ cli({
     func: async function(page, args) {
         await page.goto('https://app.neilpatel.com/en-us/app/ubersuggest/keywords/test/0/us');
         
-        // Wait for full SPA render
-        var waited = 0;
-        while (waited < 20) {
-            await new Promise(function(r) { setTimeout(r, 2000); });
-            waited += 2;
-            var ready = await evalExpr(page, `(function(){
-                return JSON.stringify({
-                    bodyLen: document.body.innerText.length,
-                    hasNav: !!document.querySelector('button[data-testid="nav-avatar-button"]')
-                });
-            })()`);
-            var state = JSON.parse(ready);
-            if (state.bodyLen > 2000 && state.hasNav) break;
-        }
+        console.error('[ubersuggest] Waiting for page...');
+        var result = await waitForPage(page, 20);
+        console.error('[ubersuggest] State:', JSON.stringify({
+            waited: result.waited,
+            hasNav: result.state.hasNav,
+            hasSignIn: result.state.hasSignIn,
+            hasGoogleLink: result.state.hasGoogleLink,
+            isLogin: result.state.isLogin
+        }));
         
-        // Check login — real avatars have Google CDN /a/ path or gravatar
-        var isLoggedIn = await evalExpr(page, `(function(){
-            var b = document.querySelector('button[data-testid="nav-avatar-button"]');
-            if (!b) return false;
-            var img = b.querySelector("img[alt*='avatar']");
-            if (!img || !img.src) return false;
-            return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
-        })()`);
-        
-        if (isLoggedIn) {
-            var userInfo = await evalExpr(page, `(function(){
-                var t = document.body.innerText || "";
-                var qm = t.match(/(\\d+) out of (\\d+) free/i);
-                return JSON.stringify({ quota: qm ? qm[0] : 'unknown' });
+        // === Case 1: Already logged in ===
+        if (result.state.hasNav) {
+            var loggedIn = await evalExpr(page, `(function(){
+                var b = document.querySelector('button[data-testid="nav-avatar-button"]');
+                var img = b ? b.querySelector("img[alt*='avatar']") : null;
+                if (!img || !img.src) return false;
+                return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
             })()`);
             
-            return [
-                { metric: 'Status', value: '\u2705 Logged in' },
-                { metric: 'Quota', value: JSON.parse(userInfo).quota }
-            ];
-        }
-        
-        // Not logged in — find and click sign-in button
-        console.error('[ubersuggest] Session expired, attempting Google OAuth...');
-        
-        var clicked = await evalExpr(page, `(function(){
-            var buttons = Array.from(document.querySelectorAll("button, a"));
-            var googleBtn = buttons.find(function(el) {
-                var text = (el.innerText || "").toLowerCase();
-                return text.indexOf("google") > -1 || text.indexOf("sign in") > -1;
-            });
-            if (!googleBtn) {
-                googleBtn = buttons.find(function(el) {
-                    var href = el.getAttribute("href") || "";
-                    return href.indexOf("google") > -1 || href.indexOf("oauth") > -1;
-                });
-            }
-            if (googleBtn) { googleBtn.click(); return true; }
-            return false;
-        })()`);
-        
-        if (!clicked) {
-            throw new CliError('LOGIN_FAILED', 
-                'Could not find Sign-in button on Ubersuggest page', 
-                'Manual login at app.neilpatel.com');
-        }
-        
-        // Wait for OAuth redirect + back to Ubersuggest
-        console.error('[ubersuggest] Waiting for OAuth redirect...');
-        var oauthWaited = 0;
-        var OAUTH_MAX = 30;
-        while (oauthWaited < OAUTH_MAX) {
-            await new Promise(function(r) { setTimeout(r, 2000); });
-            oauthWaited += 2;
-            
-            var currentUrl = await evalExpr(page, `window.location.href`);
-            var stillOnGoogle = currentUrl.indexOf('accounts.google.com') > -1 
-                              || currentUrl.indexOf('consent') > -1;
-            
-            if (currentUrl.indexOf('neilpatel') > -1 && !stillOnGoogle) {
-                await new Promise(function(r) { setTimeout(r, 3000); });
-                
-                var nowLoggedIn = await evalExpr(page, `(function(){
-                    var b = document.querySelector('button[data-testid="nav-avatar-button"]');
-                    if (!b) return false;
-                    var img = b.querySelector("img[alt*='avatar']");
-                    if (!img || !img.src) return false;
-                    return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
+            if (loggedIn) {
+                var quota = await evalExpr(page, `(function(){
+                    var t = document.body.innerText || '';
+                    var m = t.match(/(\\d+) out of (\\d+) free/i);
+                    return m ? m[0] : 'unknown';
                 })()`);
+                return [
+                    { metric: 'Status', value: '\u2705 Already logged in' },
+                    { metric: 'Quota', value: quota }
+                ];
+            }
+        }
+        
+        // === Case 2: On overview page but not logged in ("Sign in" link) ===
+        if (result.state.hasSignIn && !result.state.isLogin) {
+            console.error('[ubersuggest] Clicking Sign in...');
+            var signResult = await clickLink(page, 'Sign in');
+            console.error('[ubersuggest] Sign in:', signResult);
+            
+            // Wait for redirect to /login page
+            await new Promise(function(r) { setTimeout(r, 5000); });
+            
+            // Re-check state
+            var afterSignIn = await waitForPage(page, 15);
+            result = afterSignIn;
+        }
+        
+        // === Case 3: On /login page or redirected here ===
+        if (result.state.hasGoogleLink || result.state.isLogin) {
+            console.error('[ubersuggest] Clicking Continue with Google...');
+            var googleResult = await clickLink(page, 'Continue with Google');
+            console.error('[ubersuggest] Google auth:', googleResult);
+            
+            if (googleResult === 'not-found') {
+                throw new CliError('LOGIN_FAILED', 'Cannot find Continue with Google link');
+            }
+            
+            // Wait for OAuth round-trip
+            console.error('[ubersuggest] Waiting for OAuth...');
+            var oauthWaited = 0;
+            while (oauthWaited < 35) {
+                await new Promise(function(r) { setTimeout(r, 2000); });
+                oauthWaited += 2;
                 
-                if (nowLoggedIn) {
-                    return [
-                        { metric: 'Status', value: '\u2705 Re-authenticated via Google' },
-                        { metric: 'OAuth time', value: oauthWaited + 's' }
-                    ];
+                var url = await evalExpr(page, `window.location.href`);
+                var onGoogle = url.indexOf('accounts.google.com') > -1 || url.indexOf('consent') > -1;
+                var backToNeilpatel = url.indexOf('neilpatel') > -1 && !onGoogle;
+                
+                if (backToNeilpatel) {
+                    await new Promise(function(r) { setTimeout(r, 3000); });
+                    
+                    var success = await evalExpr(page, `(function(){
+                        var b = document.querySelector('button[data-testid="nav-avatar-button"]');
+                        if (!b) return false;
+                        var img = b.querySelector("img[alt*='avatar']");
+                        if (!img || !img.src) return false;
+                        return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
+                    })()`);
+                    
+                    if (success) {
+                        return [
+                            { metric: 'Status', value: '\u2705 Logged in via Google OAuth' },
+                            { metric: 'Time', value: oauthWaited + 's' }
+                        ];
+                    }
+                }
+                
+                // Auto-click consent buttons
+                if (onGoogle && oauthWaited > 10) {
+                    await evalExpr(page, `(function(){
+                        var btns = Array.from(document.querySelectorAll("button"));
+                        var c = btns.find(function(b){
+                            var t = (b.innerText||'').toLowerCase();
+                            return t==='continue'||t==='allow'||t==='accept';
+                        });
+                        if(c) c.click();
+                    })()`);
                 }
             }
             
-            // Auto-click Continue/Allow on consent page
-            if (stillOnGoogle && oauthWaited > 15) {
-                await evalExpr(page, `(function(){
-                    var btns = Array.from(document.querySelectorAll("button"));
-                    var c = btns.find(function(b) {
-                        var t = (b.innerText || "").toLowerCase();
-                        return t === "continue" || t === "allow" || t === "accept" || t === "next";
-                    });
-                    if (c) c.click();
-                })()`);
+            // Final check
+            var finalOk = await evalExpr(page, `(function(){
+                var b = document.querySelector('button[data-testid="nav-avatar-button"]');
+                if (!b) return false;
+                var img = b.querySelector("img[alt*='avatar']");
+                if (!img || !img.src) return false;
+                return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
+            })()`);
+            
+            if (finalOk) {
+                return [
+                    { metric: 'Status', value: '\u2705 Logged in' },
+                    { metric: 'Time', value: oauthWaited + 's' }
+                ];
             }
+            
+            throw new CliError('LOGIN_TIMEOUT',
+                'OAuth did not complete within timeout',
+                'May need manual account selection on Google consent page');
         }
         
-        // Final check
-        var finalCheck = await evalExpr(page, `(function(){
-            var b = document.querySelector('button[data-testid="nav-avatar-button"]');
-            if (!b) return false;
-            var img = b.querySelector("img[alt*='avatar']");
-            if (!img || !img.src) return false;
-            return img.src.indexOf('/a/') !== -1 || img.src.indexOf('gravatar') !== -1;
-        })()`);
-        
-        if (finalCheck) {
-            return [
-                { metric: 'Status', value: '\u2705 Logged in (slow OAuth)' },
-                { metric: 'Time', value: oauthWaited + 's' }
-            ];
-        }
-        
-        throw new CliError('LOGIN_TIMEOUT',
-            'OAuth did not complete within timeout. May need manual Google account selection.',
-            'Try: open app.neilpatel.com manually and click Sign in with Google');
+        // Unknown state
+        throw new CliError('NAV_ERROR',
+            'Unexpected page state after navigation',
+            'URL: ' + result.state.url + ', bodyLen: ' + result.state.bodyLen);
     },
 });
