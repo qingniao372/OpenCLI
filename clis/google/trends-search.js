@@ -53,7 +53,20 @@ cli({
         const url = `https://trends.google.com/trends/explore?q=${query}&date=${encodeURIComponent(dateRange)}&geo=${geo}&hl=en`;
         
         await page.goto(url);
-        await page.wait(8);
+        
+        // Smart wait: poll until widgets render (GT is a heavy SPA)
+        // Fixed 8s was causing EMPTY_RESULT on slow loads / cron environments
+        const MAX_WAIT = 25;
+        const POLL_INTERVAL = 2;
+        let waited = 0;
+        let widgetCount = 0;
+        while (waited < MAX_WAIT) {
+            widgetCount = await page.evaluate(`document.querySelectorAll('widget[type]').length`);
+            if (widgetCount >= 3) break; // at least line chart + 2 query widgets expected
+            await new Promise(r => setTimeout(r, POLL_INTERVAL * 1000));
+            waited += POLL_INTERVAL;
+        }
+        await page.wait(2); // extra buffer after detection
         
         const data = await page.evaluate(`
             (function() {
@@ -178,16 +191,20 @@ cli({
         data.relatedQueries.rising = dedup(data.relatedQueries.rising || []);
         data.relatedTopics.top = dedup(data.relatedTopics.top || []);
         data.relatedTopics.rising = dedup(data.relatedTopics.rising || []);
+        // Validate — be lenient: any meaningful data counts
+        const hasInterest = (data.interestValues.length > 0) || (data._meta?.hasLineChart);
+        const hasQueries = (data.relatedQueries.top.length > 0) || (data.relatedQueries.rising.length > 0);
+        const hasTopics = (data.relatedTopics.top.length > 0) || (data.relatedTopics.rising.length > 0);
+        const hasSubregion = data.subregion.length > 0;
         
-        // Validate
-        const hasData = (data.relatedQueries.top.length > 0) 
-                     || (data.relatedQueries.rising.length > 0)
-                     || (data.relatedTopics.top.length > 0)
-                     || (data._meta?.hasLineChart)
-                     || (data.subregion.length > 0);
+        // Debug info for troubleshooting
+        data._meta.waitedSec = waited;
+        data._meta.widgetCount = data._meta.widgetCount || widgetCount;
         
-        if (!hasData) {
-            throw new CliError('EMPTY_RESULT', 'No data extracted from Google Trends', 'Try --verbose');
+        if (!hasInterest && !hasQueries && !hasTopics && !hasSubregion) {
+            throw new CliError('EMPTY_RESULT', 
+                `No data extracted from Google Trends (widgets: ${widgetCount}, waited: ${waited}s, hasLineChart: ${!!data._meta?.hasLineChart}, svgPaths: ${data._meta?.svgPaths})`, 
+                'Try --verbose or increase --months range');
         }
         
         // Format output
