@@ -62,8 +62,15 @@ cli({
     func: async function(page, args) {
         var query = args.query;
         
+        // Step 0: Force full page reload to clear SPA state
+        // Required because Ubersuggest is a React SPA — repeated goto() to same origin
+        // triggers client-side routing instead of full reload, leaving stale DOM nodes.
+        await page.goto('about:blank', { waitUntil: 'networkidle' });
+        await new Promise(function(r) { setTimeout(r, 500); });
+
         // Step 1: Navigate to Ubersuggest main page
-        await page.goto('https://app.neilpatel.com/en-us/app/ubersuggest/keywords/test/0/us');
+        var targetUrl = 'https://app.neilpatel.com/en-us/app/ubersuggest/keywords/test/0/us?' + Date.now();
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
         
         // Step 2: Wait for full SPA render (body content + nav bar with avatar)
         var waited = 0;
@@ -175,49 +182,65 @@ cli({
             if ((loaded.hasVolume || loaded.hasIdeas) && loaded.bodyLen > 1000) break;
         }
         
-        // Step 6: Extract all data
-        var raw = await evalExpr(page, `(function(){
-            var t = document.body.innerText || "";
-            
-            var volumeMatch = t.match(/Keyword Search Volume[\\s\\S]*?(\\d[\\d,]*)/i)
-                || t.match(/Volume[\\s\\S]*?(\\d[\\d,]*)/i);
-            var sdMatch = t.match(/SEO Difficulty[\\s\\S]*?(\\d+)/i);
-            var pdMatch = t.match(/Paid Difficulty[\\s\\S]*?(\\d+)/i);
-            var blMatch = t.match(/Backlinks[\\s\\S]*?([\\d.]+[KkMm]?)/i);
-            var quotaMatch = t.match(/(\\d+) out of (\\d+) free/i);
-            
-            var serpItems = [];
-            var serpSection = t.indexOf("Google Search Results");
-            if (serpSection > -1) {
-                var serpText = t.substring(serpSection);
-                var serpLines = serpText.split("\\n");
-                for (var i = 0; i < serpLines.length; i++) {
-                    var dm = serpLines[i].trim().match(/^\\d+\\.\\s+(.+)$/);
-                    if (dm) { serpItems.push(dm[1]); }
-                    if (serpItems.length >= 10) break;
+        // Step 6: Extract all data (with retry for stale DOM)
+        var raw = null;
+        var extractError = null;
+        for (var attempt = 0; attempt < 2; attempt++) {
+            try {
+                raw = await evalExpr(page, `(function(){
+	            var t = document.body.innerText || "";
+
+	            var volumeMatch = t.match(/Keyword Search Volume[\\s\\S]*?(\\d[\\d,]*)/i)
+	                || t.match(/Volume[\\s\\S]*?(\\d[\\d,]*)/i);
+	            var sdMatch = t.match(/SEO Difficulty[\\s\\S]*?(\\d+)/i);
+	            var pdMatch = t.match(/Paid Difficulty[\\s\\S]*?(\\d+)/i);
+	            var blMatch = t.match(/Backlinks[\\s\\S]*?([\\d.]+[KkMm]?)/i);
+	            var quotaMatch = t.match(/(\\d+) out of (\\d+) free/i);
+
+	            var serpItems = [];
+	            var serpSection = t.indexOf("Google Search Results");
+	            if (serpSection > -1) {
+	                var serpText = t.substring(serpSection);
+	                var serpLines = serpText.split("\\n");
+	                for (var i = 0; i < serpLines.length; i++) {
+	                    var dm = serpLines[i].trim().match(/^\\d+\\.\\s+(.+)$/);
+	                    if (dm) { serpItems.push(dm[1]); }
+	                    if (serpItems.length >= 10) break;
+	                }
+	            }
+
+	            var ideasStart = t.indexOf("Keyword Ideas");
+	            var ideasEnd = t.indexOf("## AI Prompt Ideas");
+	            var ideasText = ideasStart > -1
+	                ? t.substring(ideasStart, ideasEnd > -1 ? ideasEnd : ideasStart + 3000)
+	                : "";
+
+	            return JSON.stringify({
+	                volume: volumeMatch ? volumeMatch[1] : null,
+	                sd: sdMatch ? Number(sdMatch[1]) : null,
+	                pd: pdMatch ? Number(pdMatch[1]) : null,
+	                backlinks: blMatch ? blMatch[1] : null,
+	                quota: quotaMatch ? quotaMatch[0] : null,
+	                serpCount: serpItems.length,
+	                serp: serpItems,
+	                hasIdeas: ideasStart > -1,
+	                ideasText: ideasText.substring(0, 2500),
+	                _bodyLen: t.length
+	            });
+	        })()`);
+                raw = JSON.parse(raw);
+                extractError = null;
+                break;
+            } catch (e) {
+                extractError = e;
+                if (attempt === 0 && e.message && e.message.indexOf('innerText') !== -1) {
+                    await new Promise(function(r) { setTimeout(r, 3000); });
+                    continue;
                 }
+                throw e;
             }
-            
-            var ideasStart = t.indexOf("Keyword Ideas");
-            var ideasEnd = t.indexOf("## AI Prompt Ideas");
-            var ideasText = ideasStart > -1 
-                ? t.substring(ideasStart, ideasEnd > -1 ? ideasEnd : ideasStart + 3000) 
-                : "";
-            
-            return JSON.stringify({
-                volume: volumeMatch ? volumeMatch[1] : null,
-                sd: sdMatch ? Number(sdMatch[1]) : null,
-                pd: pdMatch ? Number(pdMatch[1]) : null,
-                backlinks: blMatch ? blMatch[1] : null,
-                quota: quotaMatch ? quotaMatch[0] : null,
-                serpCount: serpItems.length,
-                serp: serpItems,
-                hasIdeas: ideasStart > -1,
-                ideasText: ideasText.substring(0, 2500),
-                _bodyLen: t.length
-            });
-        })()`);
-        raw = JSON.parse(raw);
+        }
+        if (extractError) throw extractError;
         
         // Build output rows
         var rows = [];
